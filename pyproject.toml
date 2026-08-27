@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cv-generator"
+name = "document-generator"
 version = "0.2.0"
 description = "Generate a CV from a single Markdown file, as HTML, PDF or MS Word"
 readme = "README.md"
@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # PDF pulls in a ~150 MB browser, so it stays opt-in:
-#   pip install "cv-generator[pdf]" && playwright install chromium
+#   pip install "document-generator[pdf]" && playwright install chromium
 pdf = ["playwright>=1.44"]
 dev = [
     "mypy>=1.10",
@@ -31,7 +31,7 @@ dev = [
 ]
 
 [project.scripts]
-cv-generator = "cv_generator.cli:main"
+document-generator = "cv_generator.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cv_generator"]

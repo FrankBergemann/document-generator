@@ -2,7 +2,7 @@
 
 ``chrome`` is implemented. The other entries are backends that were considered
 and not built; they are recorded here so the trade-off stays visible in code
-rather than only in a chat log, and so ``cv-generator engines`` can explain why
+rather than only in a chat log, and so ``document-generator engines`` can explain why
 a name is rejected.
 
 To implement one: add a module in this package with a class satisfying
@@ -42,7 +42,7 @@ KNOWN_ENGINES: tuple[EngineInfo, ...] = (
             "download, unless a Playwright server supplies one."
         ),
         dependencies=(
-            'pip install "cv-generator[pdf]", then either `playwright install chromium` '
+            'pip install "document-generator[pdf]", then either `playwright install chromium` '
             f"or {BROWSER_WS_ENV}=ws://host:port/ pointing at `playwright run-server`"
         ),
     ),

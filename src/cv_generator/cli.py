@@ -2,14 +2,14 @@
 
 Commands::
 
-    cv-generator build data/cv.md              # every format -> dist/cv.{html,docx,pdf}
-    cv-generator build data/cv.md -f html      # -> dist/cv.html
-    cv-generator build data/cv.md -f pdf       # -> dist/cv.pdf   (headless Chromium)
-    cv-generator build data/cv.md -f docx      # -> dist/cv.docx  (MS Word)
-    cv-generator build data/cv.md -f html -f pdf
-    cv-generator validate data/cv.md
-    cv-generator engines
-    cv-generator themes
+    document-generator build data/cv.md              # every format -> dist/cv.{html,docx,pdf}
+    document-generator build data/cv.md -f html      # -> dist/cv.html
+    document-generator build data/cv.md -f pdf       # -> dist/cv.pdf   (headless Chromium)
+    document-generator build data/cv.md -f docx      # -> dist/cv.docx  (MS Word)
+    document-generator build data/cv.md -f html -f pdf
+    document-generator validate data/cv.md
+    document-generator engines
+    document-generator themes
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ FORMATS = ("html", "docx", "pdf")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cv-generator",
+        prog="document-generator",
         description="Generate a CV from a single Markdown file.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

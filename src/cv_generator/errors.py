@@ -1,4 +1,4 @@
-"""Exception hierarchy for cv-generator."""
+"""Exception hierarchy for document-generator."""
 
 from __future__ import annotations
 

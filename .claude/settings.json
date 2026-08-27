@@ -16,7 +16,7 @@
       "Bash(ruff check:*)",
       "Bash(ruff format:*)",
       "Bash(mypy:*)",
-      "Bash(cv-generator:*)",
+      "Bash(document-generator:*)",
       "Bash(python -m cv_generator:*)",
       "Bash(pip install -e .[dev])",
       "Bash(pip install -e .[pdf])",

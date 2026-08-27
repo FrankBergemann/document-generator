@@ -1,4 +1,4 @@
-# cv-generator
+# document-generator
 
 Generate a CV from a single Markdown file. You edit one `.md`, the tool produces
 a styled, print-ready document as **HTML**, **PDF** or **MS Word (.docx)**.
@@ -31,7 +31,7 @@ there, so `data/cv.md`, `dist/` and every other relative path mean the same thin
 wherever you invoke it from — including path arguments, which are read relative to
 the project root rather than your shell's directory. Absolute paths are absolute.
 
-`pip install`ing the package still puts a `cv-generator` command on PATH; the
+`pip install`ing the package still puts a `document-generator` command on PATH; the
 scripts prefer it and fall back to `python -m cv_generator.cli`.
 
 They are bash scripts, which the dev container and CI have. On a Windows host use
@@ -80,7 +80,7 @@ Docker network, and `pdf/chrome.py` connects to the browser over a websocket
 instead of launching one locally:
 
 ```
-cv-generator (python:3.13)  ──ws://playwright:3000/──>  playwright run-server
+document-generator (python:3.13)  ──ws://playwright:3000/──>  playwright run-server
                             <──────  PDF bytes  ──────  (Chromium, noble)
 ```
 
@@ -106,7 +106,7 @@ files a root container creates in it are root-owned and mode 0755, `vscode` then
 cannot write them, and Windows cannot repair Linux ownership. So `postCreateCommand`
 starts with `sudo chown -R vscode .` to clean up after any earlier root container,
 and tool caches (`__pycache__`, mypy, ruff, pytest) are redirected to
-`/tmp/cv-generator/` by [.devcontainer/tool-caches.env](.devcontainer/tool-caches.env)
+`/tmp/document-generator/` by [.devcontainer/tool-caches.env](.devcontainer/tool-caches.env)
 so they never land in the repo at all.
 
 If a build reports `Permission denied` on a file in `dist/`, check whether Acrobat

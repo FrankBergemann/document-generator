@@ -31,12 +31,12 @@ python_bin() {
   fi
 }
 
-# `cv-generator` is on PATH after `pip install -e .`, but not in a shell older
+# `document-generator` is on PATH after `pip install -e .`, but not in a shell older
 # than the install and not when the package was only put on sys.path.
 # `python -m cv_generator.cli` reaches the same main() either way.
 cv_generator() {
-  if command -v cv-generator >/dev/null 2>&1; then
-    cv-generator "$@"
+  if command -v document-generator >/dev/null 2>&1; then
+    document-generator "$@"
   else
     "$(python_bin)" -m cv_generator.cli "$@"
   fi

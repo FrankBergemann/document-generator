@@ -37,4 +37,4 @@ MSYS_NO_PATHCONV=1 docker run --rm \
   --env-file "$CACHES_ENV_FILE" \
   -e CV_GENERATOR_BROWSER_WS=ws://playwright:3000/ \
   python:3.13-slim bash -c \
-  "pip install -q -e '.[dev]' playwright==$version && cv-generator engines | grep 'chrome \[ready\]' && pytest $pytest_args"
+  "pip install -q -e '.[dev]' playwright==$version && document-generator engines | grep 'chrome \[ready\]' && pytest $pytest_args"

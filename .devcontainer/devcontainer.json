@@ -33,7 +33,7 @@
 	//      `rm` does not help either: removing files inside a root-owned
 	//      directory needs write permission on that directory. So: chown, once,
 	//      at create. It is a no-op on a clean checkout.
-	//   2. Editable install, so `cv-generator` is on PATH and src/ edits take
+	//   2. Editable install, so `document-generator` is on PATH and src/ edits take
 	//      effect immediately. No `playwright install`: the browser lives in the
 	//      playwright service, and the pip pin must match that service's image
 	//      tag, so it comes from PLAYWRIGHT_VERSION in .env via compose.

@@ -17,7 +17,7 @@ browser never touches this filesystem. A theme that referenced a local font or
 image would still render locally and silently lose that resource remotely, which
 is the reason to keep the document self-contained.
 
-Playwright is an optional dependency (``pip install "cv-generator[pdf]"``), so it
+Playwright is an optional dependency (``pip install "document-generator[pdf]"``), so it
 is imported inside the methods rather than at module scope: importing this
 module must work on a machine that will only ever produce HTML or ``.docx``. The
 pip package alone is enough for remote mode -- it ships the driver, and the
@@ -48,7 +48,7 @@ ZERO_MARGINS = {"top": "0", "right": "0", "bottom": "0", "left": "0"}
 BROWSER_WS_ENV = "CV_GENERATOR_BROWSER_WS"
 
 INSTALL_HINT = (
-    'install the extra and the browser: pip install "cv-generator[pdf]" '
+    'install the extra and the browser: pip install "document-generator[pdf]" '
     "&& playwright install chromium"
 )
 
@@ -108,7 +108,7 @@ class ChromeEngine:
         runs. That is why nothing *gates* on the result --
         :func:`cv_generator.pdf.registry.get_engine` hands the engine over
         regardless, and :meth:`render` reports the real failure. A wrong answer
-        here only misreports ``cv-generator engines``; it cannot block a working
+        here only misreports ``document-generator engines``; it cannot block a working
         engine.
 
         The local check deliberately inspects the browser cache instead of

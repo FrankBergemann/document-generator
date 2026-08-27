@@ -1,4 +1,4 @@
-# cv-generator
+# document-generator
 
 CLI that turns one Markdown file (YAML frontmatter + Markdown body) into a styled
 CV as HTML, PDF or MS Word. See [README.md](README.md) for the source format and
@@ -10,9 +10,9 @@ usage.
 rule, not a convenience. Documentation, CI and this file all invoke the same
 scripts, so there is one place where "how you run it" is written down and it
 cannot drift out of date. Adding a command means adding a script there; do not
-document a bare `pytest`, `cv-generator …` or `docker compose …` line anywhere
+document a bare `pytest`, `document-generator …` or `docker compose …` line anywhere
 else, and do not add a second wrapper mechanism (Makefile, `[project.scripts]`
-entries beyond `cv-generator` itself, npm-style task runner).
+entries beyond `document-generator` itself, npm-style task runner).
 
 Run them inside the dev container (Python 3.13, dependencies installed on
 create), or in a local venv after `run/setup.sh`.
@@ -51,7 +51,7 @@ Conventions the scripts follow, worth keeping:
   cv_generator.cli`), `dev_tool()` (which reports the missing dev extra instead
   of "command not found", and never masks the tool's own exit code) and the
   compose paths.
-- `[project.scripts]` still installs `cv-generator`, because a pip-installed copy
+- `[project.scripts]` still installs `document-generator`, because a pip-installed copy
   has no `run/` directory. The scripts prefer it when it is on PATH.
 
 PDF tests skip themselves unless a browser is reachable — installed locally
@@ -73,7 +73,7 @@ Two things that will bite otherwise:
 
 - **The network is external**, shared with neighbouring projects. It must exist
   before compose runs (`docker network create common_network`, which
-  `initializeCommand` does), and the compose project is named `cv-generator`
+  `initializeCommand` does), and the compose project is named `document-generator`
   explicitly — the default would be `.devcontainer`, which every project has.
 - **Client and server versions must match**, or `connect()` fails on a version
   mismatch. `PLAYWRIGHT_VERSION` in `.devcontainer/.env` sets both the image tag
@@ -120,7 +120,7 @@ a mess that outlives a container rebuild. Three guards:
   directory needs write permission on that directory.
 - **Tool caches go outside the mount**, via
   [.devcontainer/tool-caches.env](.devcontainer/tool-caches.env) — `__pycache__`,
-  mypy, ruff and pytest caches all land in `/tmp/cv-generator/`. So a root
+  mypy, ruff and pytest caches all land in `/tmp/document-generator/`. So a root
   container (`run/verify-in-docker.sh`, CI) cannot drop anything into the tree in the
   first place, and there is nothing left in the repo for two users to fight over
   except `dist/`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render the CV. Everything after the script name goes to `cv-generator build`.
+# Render the CV. Everything after the script name goes to `document-generator build`.
 #
 #   run/build.sh                               # data/cv.md -> dist/cv.{html,docx,pdf}
 #   run/build.sh -f html                       # -> dist/cv.html
