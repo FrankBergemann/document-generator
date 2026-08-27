@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(run/build.sh:*)",
+      "Bash(run/validate.sh:*)",
+      "Bash(run/themes.sh:*)",
+      "Bash(run/engines.sh:*)",
+      "Bash(run/test.sh:*)",
+      "Bash(run/lint.sh:*)",
+      "Bash(run/format.sh:*)",
+      "Bash(run/typecheck.sh:*)",
+      "Bash(run/check.sh:*)",
+      "Bash(run/setup.sh:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(ruff check:*)",
+      "Bash(ruff format:*)",
+      "Bash(mypy:*)",
+      "Bash(cv-generator:*)",
+      "Bash(python -m cv_generator:*)",
+      "Bash(pip install -e .[dev])",
+      "Bash(pip install -e .[pdf])",
+      "Bash(playwright install:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)"
+    ]
+  }
+}

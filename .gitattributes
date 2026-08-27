@@ -1,0 +1,4 @@
+# Normalize to LF in the repository. The dev container and CI are Linux; the
+# host is Windows. Without this, checkouts round-trip through CRLF and diffs
+# show whole-file changes.
+* text=auto eol=lf

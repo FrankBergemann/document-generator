@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="{{ cv.lang }}">
+<head>
+<meta charset="utf-8">
+<title>{{ cv.name }}{% if cv.headline %} - {{ cv.headline }}{% endif %}</title>
+<style>
+{{ stylesheet }}
+</style>
+</head>
+<body>
+<main class="cv">
+
+  <header class="cv-header">
+    <div class="cv-identity">
+      <h1 class="cv-name">{{ cv.name }}</h1>
+      {% if cv.headline %}
+      <p class="cv-headline">{{ cv.headline }}</p>
+      {% endif %}
+      {% if not cv.contact.is_empty() %}
+      <ul class="cv-contact">
+        {% if cv.contact.email %}
+        <li><a href="mailto:{{ cv.contact.email }}">{{ cv.contact.email }}</a></li>
+        {% endif %}
+        {% if cv.contact.phone %}
+        <li>{{ cv.contact.phone }}</li>
+        {% endif %}
+        {% if cv.contact.location %}
+        <li>{{ cv.contact.location }}</li>
+        {% endif %}
+        {% for link in cv.contact.links %}
+        <li><a href="{{ link.url }}">{{ link.label }}</a></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% if cv.photo %}
+    {# Embedded as a data URL, never as a file reference: the PDF browser may be
+       in another container and cannot read this filesystem. #}
+    <img class="cv-photo" src="{{ cv.photo.data_uri() }}" alt="{{ cv.name }}">
+    {% endif %}
+  </header>
+
+  {% if cv.summary %}
+  <section class="cv-summary">
+    {{ cv.summary | markdown }}
+  </section>
+  {% endif %}
+
+  {% for section in cv.sections %}
+  {# A section is either Markdown from the .md or blocks imported from a .docx;
+     the extra class lets an imported section page-break between its blocks. #}
+  <section class="cv-section{% if section.blocks %} cv-section--blocks{% endif %}" id="{{ section.slug }}">
+    <h2>{{ section.title }}</h2>
+    {% if section.blocks %}
+    {{ section.blocks | blocks }}
+    {% else %}
+    {{ section.markdown | markdown }}
+    {% endif %}
+  </section>
+  {% endfor %}
+
+</main>
+</body>
+</html>

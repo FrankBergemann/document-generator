@@ -1,0 +1,247 @@
+/* Classic theme - single column, print-first. Tuned for A4 at 100% scale. */
+
+@page {
+  size: A4;
+  margin: 16mm 15mm;
+}
+
+:root {
+  --ink: #1a1a1a;
+  --ink-muted: #55585c;
+  --rule: #d4d7db;
+  --accent: #2f5d8a;
+  --body-size: 10.5pt;
+  /* The photo drives the header's height rather than the other way round, so a
+     portrait stays large enough to read. Mirrored by WordTheme in word.py. */
+  --photo-width: 34mm;
+  /* Only a guard: clears a 3:4 portrait (45.3mm at this width) untouched. */
+  --photo-max-height: 48mm;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: var(--body-size);
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.cv {
+  max-width: 190mm;
+  margin: 0 auto;
+  padding: 12mm 10mm;
+}
+
+/* --- header ------------------------------------------------------------- */
+
+.cv-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8mm;
+  border-bottom: 1.5px solid var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 1.2rem;
+}
+
+.cv-identity {
+  flex: 1 1 auto;
+  /* Without this a long email address can push the photo past the margin. */
+  min-width: 0;
+}
+
+.cv-photo {
+  flex: 0 0 auto;
+  width: var(--photo-width);
+  height: auto;
+  /* Guard for an unusually tall portrait; `contain` keeps it undistorted. */
+  max-height: var(--photo-max-height);
+  object-fit: contain;
+  border-radius: 2px;
+}
+
+.cv-name {
+  margin: 0;
+  font-size: 1.9rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.cv-headline {
+  margin: 0.15rem 0 0;
+  color: var(--accent);
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.cv-contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+/* --- sections ----------------------------------------------------------- */
+
+.cv-summary {
+  margin-bottom: 1.1rem;
+  color: var(--ink-muted);
+}
+
+.cv-summary > p:first-child {
+  margin-top: 0;
+}
+
+.cv-section {
+  margin-bottom: 1.1rem;
+  /* Never orphan a heading at the bottom of a page. */
+  break-inside: avoid-page;
+}
+
+.cv-section > h2 {
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.15rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent);
+  break-after: avoid-page;
+}
+
+/* An h3 is one entry: a role, a degree, a project. */
+.cv-section h3 {
+  margin: 0.7rem 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+  break-after: avoid-page;
+}
+
+.cv-section h3:first-of-type {
+  margin-top: 0;
+}
+
+/* The italic line directly under an entry heading is its date/place meta. */
+.cv-section h3 + p > em:only-child {
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+  font-style: normal;
+}
+
+.cv-section h3 + p {
+  margin: 0.1rem 0 0.3rem;
+}
+
+.cv-section ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.cv-section li {
+  margin-bottom: 0.15rem;
+}
+
+.cv-section p {
+  margin: 0.35rem 0;
+}
+
+/* --- sections imported from a .docx ------------------------------------- */
+
+/* Weight, size and colour come from the source document, on the runs; this
+   only supplies the geometry Word gets from its own page setup. An imported
+   section is long (one table per project), so it must be allowed to break --
+   inside a single project table it must not. */
+
+.cv-section--blocks {
+  break-inside: auto;
+}
+
+.cv-blocks p {
+  margin: 0.2rem 0;
+}
+
+.cv-blocks p:empty {
+  /* A blank paragraph inside a cell is a blank line in Word. Left alone it
+     collapses to its margins here, and the two formats drift apart. */
+  min-height: 1em;
+}
+
+.cv-blocks ul,
+.cv-blocks ol {
+  margin: 0.15rem 0;
+  padding-left: 1.05rem;
+}
+
+.cv-blocks li {
+  margin-bottom: 0.1rem;
+}
+
+.cv-block-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 0.55rem;
+  break-inside: avoid-page;
+}
+
+.cv-block-table td {
+  padding: 0.25rem 0.35rem;
+  vertical-align: top;
+}
+
+.cv-block-table--ruled,
+.cv-block-table--ruled td {
+  border: 0.5pt solid var(--rule);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+strong {
+  font-weight: 600;
+}
+
+/* --- screen preview ----------------------------------------------------- */
+
+@media screen {
+  body {
+    background: #f2f3f5;
+    padding: 2rem 1rem;
+  }
+
+  .cv {
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+    border-radius: 2px;
+  }
+}
+
+@media print {
+  body {
+    background: none;
+    padding: 0;
+  }
+
+  .cv {
+    padding: 0;
+    max-width: none;
+    box-shadow: none;
+  }
+
+  a {
+    color: var(--ink);
+  }
+}

@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # Same script the developer runs, so a broken run/ script fails CI rather
+      # than being discovered by the next person who types it.
+      - name: Install
+        run: run/setup.sh
+
+      # Without the browser the PDF tests skip themselves, so CI would report
+      # green while never exercising the chrome engine.
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+
+      # Not run/setup.sh --pdf: the playwright package is already in the dev
+      # extra, and only CI wants --with-deps, which apt-installs the browser's
+      # system libraries on the runner itself.
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Lint
+        run: run/lint.sh
+
+      - name: Format
+        run: run/format.sh --check
+
+      - name: Types
+        run: run/typecheck.sh
+
+      - name: Tests
+        run: run/test.sh
+
+      - name: Build the sample CV in every format
+        run: |
+          run/build.sh -f html
+          run/build.sh -f pdf
+          run/build.sh -f docx
+
+      - name: Upload the sample CV
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-cv-py${{ matrix.python-version }}
+          path: dist/
+
+  # The dev container setup: Python here, Chromium in a separate container. The
+  # job above would stay green if that path rotted, because it has a local
+  # browser and never connects to anything.
+  remote-browser:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # Same source of truth as the compose file: client and server versions
+      # have to match or connect() fails on a version mismatch.
+      - name: Read the pinned Playwright version
+        run: grep '^PLAYWRIGHT_VERSION=' .devcontainer/.env >> "$GITHUB_ENV"
+
+      - name: Install without a browser
+        run: |
+          run/setup.sh
+          pip install "playwright==$PLAYWRIGHT_VERSION"
+
+      - name: Start the browser container
+        run: |
+          docker run -d --name playwright -p 3000:3000 --init \
+            --user pwuser --workdir /home/pwuser \
+            "mcr.microsoft.com/playwright:v$PLAYWRIGHT_VERSION-noble" \
+            /bin/sh -c "npx -y playwright@$PLAYWRIGHT_VERSION run-server --port 3000 --host 0.0.0.0"
+          timeout 120 bash -c \
+            'until docker logs playwright 2>&1 | grep -q "Listening on"; do sleep 2; done'
+
+      - name: Tests against the remote browser
+        env:
+          CV_GENERATOR_BROWSER_WS: ws://localhost:3000/
+        run: |
+          run/engines.sh | grep "chrome \[ready\]"
+          run/test.sh
+
+      - name: Build a PDF with no local browser
+        env:
+          CV_GENERATOR_BROWSER_WS: ws://localhost:3000/
+        run: run/build.sh -f pdf

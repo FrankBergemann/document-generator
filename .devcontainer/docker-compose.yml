@@ -1,0 +1,72 @@
+# Two containers side by side: Python here, Chromium there.
+#
+# The dev container used to download a ~150 MB browser into a named volume.
+# Instead, the official Playwright image runs `playwright run-server` and this
+# container connects to it over a websocket (CV_GENERATOR_BROWSER_WS, read by
+# src/cv_generator/pdf/chrome.py). Consequences worth knowing:
+#
+#   * The Python image stays a plain Python image -- no browser, no browser
+#     system libraries, no `playwright install` on create.
+#   * Both images pull and start in parallel, and the browser survives a dev
+#     container rebuild because it is a separate service.
+#   * The two must agree on a Playwright version, so PLAYWRIGHT_VERSION in .env
+#     fixes both the image tag and the pip pin.
+#
+# `common_network` is external and shared with other projects (the
+# playwright-course dev container uses the same one), so a browser server
+# started by either project is reachable by name from both. One time on the
+# host:  docker network create common_network
+
+# Compose would otherwise name the project after this directory -- ".devcontainer",
+# which every project has. Two dev containers up at once would then fight over
+# the same container names.
+name: cv-generator
+
+services:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/python:dev-3.13-bookworm
+    # Without this the service runs as root -- compose does not read the image's
+    # remoteUser metadata the way `"image":` in devcontainer.json does. Then
+    # every directory root creates in the bind mount (dist/, caches) is
+    # 0755 root:root, and the next run as `vscode` cannot write to it. Setting
+    # it here rather than only in devcontainer.json keeps `docker compose exec`
+    # and VS Code on the same user.
+    user: vscode
+    volumes:
+      - ..:/workspaces/cv-generator:cached
+    # Tool caches, redirected out of the workspace; see the file.
+    env_file:
+      - tool-caches.env
+    environment:
+      # Where pdf/chrome.py connects instead of launching a local Chromium.
+      # Set it to an empty string to fall back to a local browser.
+      CV_GENERATOR_BROWSER_WS: ws://playwright:3000/
+      PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION}
+    command: sleep infinity
+    depends_on:
+      - playwright
+    networks:
+      - shared_net
+
+  playwright:
+    # Ships the browsers and their system libraries; nothing to install here.
+    image: mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
+    init: true
+    restart: unless-stopped
+    # The image's documented way to run the server: unprivileged user, and the
+    # npm package fetched at start so it matches the browsers baked in.
+    user: pwuser
+    working_dir: /home/pwuser
+    command: >
+      /bin/sh -c "npx -y playwright@${PLAYWRIGHT_VERSION} run-server --port 3000 --host 0.0.0.0"
+    ports:
+      # Also published to the host, so a local venv on Windows can render PDFs
+      # with CV_GENERATOR_BROWSER_WS=ws://localhost:3000/ and no local browser.
+      - "3000:3000"
+    networks:
+      - shared_net
+
+networks:
+  shared_net:
+    external: true
+    name: common_network

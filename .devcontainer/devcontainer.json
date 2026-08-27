@@ -1,0 +1,59 @@
+// For format details, see https://aka.ms/devcontainer.json
+{
+	"name": "cv-generator",
+
+	// Two services, started together: this Python container and a Playwright
+	// container holding Chromium. See docker-compose.yml for why.
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "devcontainer",
+	"workspaceFolder": "/workspaces/cv-generator",
+	"shutdownAction": "stopCompose",
+
+	// Belt and braces with `user: vscode` in the compose file: everything that
+	// writes into the workspace must be the same user, or it leaves files the
+	// other one cannot touch.
+	"remoteUser": "vscode",
+
+	// `pip install --user` puts console scripts here. Debian's ~/.profile only
+	// adds the directory if it already exists when the shell starts, which it
+	// does not on the first shell after a rebuild.
+	"remoteEnv": {
+		"PATH": "${containerEnv:PATH}:/home/vscode/.local/bin"
+	},
+
+	// The compose network is external so it can be shared with other projects,
+	// which means it has to exist before compose runs. Creating it is idempotent
+	// in effect; the echo keeps the second run from failing the command.
+	"initializeCommand": "docker network create common_network || echo 'common_network already exists'",
+
+	// Two steps:
+	//
+	//   1. Take ownership of anything a previous root container left behind --
+	//      `dist/`, stray caches. Ownership cannot be repaired from Windows, and
+	//      `rm` does not help either: removing files inside a root-owned
+	//      directory needs write permission on that directory. So: chown, once,
+	//      at create. It is a no-op on a clean checkout.
+	//   2. Editable install, so `cv-generator` is on PATH and src/ edits take
+	//      effect immediately. No `playwright install`: the browser lives in the
+	//      playwright service, and the pip pin must match that service's image
+	//      tag, so it comes from PLAYWRIGHT_VERSION in .env via compose.
+	//
+	// Deliberately not `run/setup.sh`, which is the same install for a local venv
+	// on the host: only here does it need `--user` and the version pin, and only
+	// here is there a root-owned mess to chown first.
+	"postCreateCommand": "sudo chown -R vscode . && pip install --user -e '.[dev]' \"playwright==$PLAYWRIGHT_VERSION\"",
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"charliermarsh.ruff",
+				"anthropic.claude-code"
+			],
+			"settings": {
+				"python.testing.pytestEnabled": true,
+				"python.testing.pytestArgs": ["tests"]
+			}
+		}
+	}
+}

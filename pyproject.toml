@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cv-generator"
+version = "0.2.0"
+description = "Generate a CV from a single Markdown file, as HTML, PDF or MS Word"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Frank Bergemann", email = "frank.bergemann@gmx.de" }]
+dependencies = [
+    "jinja2>=3.1",
+    "markdown-it-py>=3.0",
+    "pydantic>=2.7",
+    "python-docx>=1.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# PDF pulls in a ~150 MB browser, so it stays opt-in:
+#   pip install "cv-generator[pdf]" && playwright install chromium
+pdf = ["playwright>=1.44"]
+dev = [
+    "mypy>=1.10",
+    "playwright>=1.44",
+    "pypdf>=4.2",
+    "pytest>=8.2",
+    "ruff>=0.5",
+    "types-pyyaml>=6.0",
+]
+
+[project.scripts]
+cv-generator = "cv_generator.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cv_generator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+# CVs use these on purpose: en/em dashes in date ranges, middle dots as
+# separators. Flagging them as "ambiguous" would mean a noqa on every sample.
+allowed-confusables = ["–", "—", "·"]
+
+[tool.ruff.lint.per-file-ignores]
+# The OOXML helpers must reach into python-docx internals; there is no API.
+"src/cv_generator/ooxml.py" = ["SLF001"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["markdown_it.*", "playwright.*", "pypdf.*"]
+ignore_missing_imports = true
