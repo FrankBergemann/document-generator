@@ -2,9 +2,11 @@
 
 Commands::
 
-    cv-generator build data/cv.md              # -> dist/cv.html
+    cv-generator build data/cv.md              # every format -> dist/cv.{html,docx,pdf}
+    cv-generator build data/cv.md -f html      # -> dist/cv.html
     cv-generator build data/cv.md -f pdf       # -> dist/cv.pdf   (headless Chromium)
     cv-generator build data/cv.md -f docx      # -> dist/cv.docx  (MS Word)
+    cv-generator build data/cv.md -f html -f pdf
     cv-generator validate data/cv.md
     cv-generator engines
     cv-generator themes
@@ -34,7 +36,10 @@ from cv_generator.word import WordRenderer
 
 DEFAULT_SOURCE = Path("data/cv.md")
 DEFAULT_OUTPUT_DIR = Path("dist")
-FORMATS = ("html", "pdf", "docx")
+# Order matters: this is the order a format-less `build` renders in, and pdf comes
+# last because it is the only one that can fail on a machine that is otherwise
+# fine (no browser). The .html and .docx are already written when it does.
+FORMATS = ("html", "docx", "pdf")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,10 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
         "-f",
         "--format",
         choices=FORMATS,
-        default="html",
-        help="output format (default: html)",
+        action="append",
+        help=f"output format, repeatable (default: all of {', '.join(FORMATS)})",
     )
-    build.add_argument("-o", "--out", type=Path, help="output file path")
+    build.add_argument(
+        "-o",
+        "--out",
+        type=Path,
+        help="output file path; one format only, taken from its extension unless --format says",
+    )
     build.add_argument(
         "-t",
         "--theme",
@@ -93,22 +103,65 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def resolve_formats(requested: list[str] | None, out: Path | None) -> tuple[str, ...]:
+    """Which formats a `build` renders, from `--format` and `--out`.
+
+    No `--format` means all of them: the same CV is normally sent as `.pdf` and
+    kept as `.docx`, so producing the set is the common run and picking one the
+    exception. `--out` names a single file, so it pins the run to one format --
+    its own extension, which is the one place the wanted format is then written
+    down. Repeats collapse, and the order asked for is the order rendered in.
+    """
+    if requested:
+        formats = tuple(dict.fromkeys(requested))
+        if out is not None and len(formats) > 1:
+            joined = ", ".join(formats)
+            raise CVError(f"-o/--out names one file, so it takes a single --format (got {joined})")
+        return formats
+    if out is None:
+        return FORMATS
+    fmt = out.suffix.lstrip(".").lower()
+    if fmt not in FORMATS:
+        raise CVError(
+            f"cannot tell the format of '{out}': give it one of "
+            f"{', '.join('.' + f for f in FORMATS)}, or pass --format"
+        )
+    return (fmt,)
+
+
 def cmd_build(args: argparse.Namespace) -> int:
+    formats = resolve_formats(args.format, args.out)
     cv = parse_cv_file(args.source)
-    output: Path = args.out or DEFAULT_OUTPUT_DIR / f"{args.source.stem}.{args.format}"
 
-    if args.format == "docx":
-        WordRenderer().render(cv, output)
-    else:
-        html = Renderer(args.templates_dir).render_html(cv, args.theme)
-        if args.format == "html":
-            output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(html, encoding="utf-8")
-        else:
-            get_engine(args.engine).render(html, output)
+    # Rendered at most once and shared by the html and pdf outputs -- the pdf is
+    # printed from exactly the document written next to it, not a second render.
+    html: str | None = None
+    failed = False
 
-    print(f"wrote {output}")
-    return 0
+    for fmt in formats:
+        output: Path = args.out or DEFAULT_OUTPUT_DIR / f"{args.source.stem}.{fmt}"
+        try:
+            if fmt == "docx":
+                WordRenderer().render(cv, output)
+            else:
+                if html is None:
+                    html = Renderer(args.templates_dir).render_html(cv, args.theme)
+                if fmt == "html":
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    output.write_text(html, encoding="utf-8")
+                else:
+                    get_engine(args.engine).render(html, output)
+        except CVError as exc:
+            # One format failing must not cost the others: a missing browser is
+            # the usual reason and the .html and .docx beside it are still worth
+            # having. The exit code still reports that something went wrong, and
+            # for a single format this is exactly what `main` would have printed.
+            print(f"error: {exc}", file=sys.stderr)
+            failed = True
+            continue
+        print(f"wrote {output}")
+
+    return 1 if failed else 0
 
 
 def cmd_validate(args: argparse.Namespace) -> int:

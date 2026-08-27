@@ -34,7 +34,7 @@ class TestBuildHTML:
         self, tmp_path: Path, minimal_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.chdir(tmp_path)
-        assert main(["build", str(minimal_path)]) == 0
+        assert main(["build", str(minimal_path), "-f", "html"]) == 0
         assert (tmp_path / "dist" / "minimal.html").is_file()
 
     def test_unknown_theme_is_a_clean_error(
@@ -49,6 +49,81 @@ class TestBuildHTML:
     ) -> None:
         assert main(["build", str(tmp_path / "nope.md")]) == 1
         assert "cannot read" in capsys.readouterr().err
+
+
+class TestBuildEveryFormat:
+    """No `-f` renders the whole set, so one run produces what gets sent out."""
+
+    @requires_chromium
+    def test_no_format_writes_all_of_them(
+        self,
+        tmp_path: Path,
+        minimal_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        assert main(["build", str(minimal_path)]) == 0
+        for suffix in ("html", "docx", "pdf"):
+            assert (tmp_path / "dist" / f"minimal.{suffix}").is_file()
+        # One line per format: run/build.sh archives each of them by parsing these.
+        out = capsys.readouterr().out
+        assert [line.split(".")[-1] for line in out.splitlines() if line.startswith("wrote ")] == [
+            "html",
+            "docx",
+            "pdf",
+        ]
+
+    def test_format_is_repeatable_and_keeps_its_order(
+        self,
+        tmp_path: Path,
+        minimal_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        argv = ["build", str(minimal_path), "-f", "docx", "-f", "html", "-f", "docx"]
+        assert main(argv) == 0
+        wrote = [line for line in capsys.readouterr().out.splitlines() if line.startswith("wrote ")]
+        assert [Path(line.removeprefix("wrote ")).suffix for line in wrote] == [".docx", ".html"]
+
+    def test_out_takes_the_format_from_its_extension(
+        self, tmp_path: Path, minimal_path: Path
+    ) -> None:
+        out = tmp_path / "cv.docx"
+        assert main(["build", str(minimal_path), "-o", str(out)]) == 0
+        assert "Ada Lovelace" in [p.text for p in docx.Document(str(out)).paragraphs]
+
+    def test_out_with_an_unknown_extension_is_a_clean_error(
+        self, tmp_path: Path, minimal_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["build", str(minimal_path), "-o", str(tmp_path / "cv.rtf")]) == 1
+        assert "cannot tell the format" in capsys.readouterr().err
+
+    def test_a_failing_format_does_not_cost_the_others(
+        self,
+        tmp_path: Path,
+        minimal_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # An unreachable PDF engine stands in for the everyday case, a machine
+        # with no browser: the .html and .docx are still worth having, and the
+        # exit code still says the run was not clean.
+        monkeypatch.chdir(tmp_path)
+        assert main(["build", str(minimal_path), "-e", "nope"]) == 1
+        assert (tmp_path / "dist" / "minimal.html").is_file()
+        assert (tmp_path / "dist" / "minimal.docx").is_file()
+        assert not (tmp_path / "dist" / "minimal.pdf").exists()
+        assert "unknown PDF engine" in capsys.readouterr().err
+
+    def test_out_takes_a_single_format(
+        self, tmp_path: Path, minimal_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = tmp_path / "cv.html"
+        assert main(["build", str(minimal_path), "-f", "html", "-o", str(out)]) == 0
+        assert main(["build", str(minimal_path), "-f", "html", "-f", "docx", "-o", str(out)]) == 1
+        assert "takes a single --format" in capsys.readouterr().err
 
 
 class TestBuildWithPhoto:

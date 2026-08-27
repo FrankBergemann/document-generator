@@ -11,7 +11,7 @@ Every command this project asks you to type is a script in [run/](run/), with a
 | Script | What it does |
 |---|---|
 | [run/setup.sh](run/setup.sh) | Editable install with the dev extra; `--pdf` adds a local Chromium |
-| [run/build.sh](run/build.sh) | Render the CV (`-f html\|pdf\|docx`, `-o`, `-t`, …) |
+| [run/build.sh](run/build.sh) | Render the CV — every format, or `-f html\|pdf\|docx` (`-o`, `-t`, …) |
 | [run/validate.sh](run/validate.sh) | Parse and report, write nothing |
 | [run/themes.sh](run/themes.sh) | List HTML/PDF themes |
 | [run/engines.sh](run/engines.sh) | PDF engine status, including the browser server |
@@ -116,16 +116,25 @@ as a permission error.
 ## Usage
 
 ```bash
-run/build.sh                     # data/cv.md -> dist/cv.html
+run/build.sh                     # data/cv.md -> dist/cv.html, dist/cv.docx, dist/cv.pdf
+run/build.sh -f html             # -> dist/cv.html
 run/build.sh -f pdf              # -> dist/cv.pdf
 run/build.sh -f docx             # -> dist/cv.docx
-run/build.sh -o out.pdf -f pdf
+run/build.sh -f html -f docx     # a subset; -f is repeatable
+run/build.sh -o out.pdf
 run/build.sh -t classic          # theme (HTML/PDF only)
 run/build.sh input/other.md      # a different source file
 run/validate.sh                  # parse and report, write nothing
 run/themes.sh
 run/engines.sh
 ```
+
+With no `-f` you get all three, in the order `html`, `docx`, `pdf`: the same CV
+usually goes out as a PDF and is kept as a `.docx`, so rendering the set is the
+normal run and picking one the exception. Each format is written independently —
+with no browser reachable the `.html` and `.docx` are still produced, the PDF's
+error goes to stderr, and the exit code is non-zero. `-o` names a single file, so
+it takes a single format: from `-f`, or from the extension you gave it.
 
 Every build overwrites its target in `dist/` without asking, so the current
 result is always at the same path, and copies it to

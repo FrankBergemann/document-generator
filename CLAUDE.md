@@ -24,7 +24,8 @@ run/lint.sh                     # ruff check
 run/format.sh                   # ruff format ('--check' to only report)
 run/typecheck.sh                # mypy, strict, covers src/ and tests/
 run/check.sh                    # all four, in CI's order
-run/build.sh                    # data/cv.md -> dist/cv.html
+run/build.sh                    # data/cv.md -> dist/cv.{html,docx,pdf}
+run/build.sh -f html            # one format; -f is repeatable
 run/build.sh -f pdf             # needs chromium, see below
 run/build.sh -f docx
 run/validate.sh
@@ -34,13 +35,16 @@ Conventions the scripts follow, worth keeping:
 
 - Each one is a thin wrapper that forwards `"$@"`, so the CLI's own options keep
   working and there is no second argument parser to maintain.
-- `run/build.sh` is the only one that does anything *after* the CLI: it copies the
-  result to `dist/hist/<name>-<timestamp>.<ext>`. It learns the path it just
-  archived by reading the CLI's own `wrote <path>` line, because the CLI is what
-  resolves it (`-o`, else `dist/<source stem>.<format>`). Re-deriving that rule in
-  bash would be a second source of truth that goes stale the moment the default
-  changes -- so if you change what `build` prints on stdout, that parse is the
-  thing that breaks.
+- `run/build.sh` is the only one that does anything *after* the CLI: it copies each
+  result to `dist/hist/<name>-<timestamp>.<ext>`. It learns the paths it just
+  archived by reading the CLI's own `wrote <path>` lines -- one per format, since
+  a `-f`-less build renders all of them -- because the CLI is what resolves them
+  (`-o`, else `dist/<source stem>.<format>`). Re-deriving that rule in bash would
+  be a second source of truth that goes stale the moment the default changes -- so
+  if you change what `build` prints on stdout, that parse is the thing that
+  breaks. It also keeps the CLI's exit code instead of letting `set -e` end the
+  script: a build where only the PDF failed still wrote the other formats, and
+  those are exactly what the archive is for.
 - Shared logic lives in `run/_lib.sh`, sourced by every script: `set -euo
   pipefail`, `cd` to the project root resolved from `BASH_SOURCE` (so a script
   works from any directory), `cv_generator()` (console script, else `python -m

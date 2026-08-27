@@ -53,10 +53,9 @@ jobs:
         run: run/test.sh
 
       - name: Build the sample CV in every format
-        run: |
-          run/build.sh -f html
-          run/build.sh -f pdf
-          run/build.sh -f docx
+        # No -f is every format, and it exits non-zero if any of them fails --
+        # so this is still one job step per format's worth of coverage.
+        run: run/build.sh
 
       - name: Upload the sample CV
         uses: actions/upload-artifact@v4

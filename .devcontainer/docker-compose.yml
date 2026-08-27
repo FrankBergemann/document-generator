@@ -20,7 +20,7 @@
 # Compose would otherwise name the project after this directory -- ".devcontainer",
 # which every project has. Two dev containers up at once would then fight over
 # the same container names.
-name: cv-generator
+name: document-generator
 
 services:
   devcontainer:
@@ -33,7 +33,7 @@ services:
     # and VS Code on the same user.
     user: vscode
     volumes:
-      - ..:/workspaces/cv-generator:cached
+      - ..:/workspaces/document-generator:cached
     # Tool caches, redirected out of the workspace; see the file.
     env_file:
       - tool-caches.env
@@ -69,4 +69,4 @@ services:
 networks:
   shared_net:
     external: true
-    name: common_network
+    name: document_generator_network

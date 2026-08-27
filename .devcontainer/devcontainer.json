@@ -1,12 +1,12 @@
 // For format details, see https://aka.ms/devcontainer.json
 {
-	"name": "cv-generator",
+	"name": "document-generator",
 
 	// Two services, started together: this Python container and a Playwright
 	// container holding Chromium. See docker-compose.yml for why.
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "devcontainer",
-	"workspaceFolder": "/workspaces/cv-generator",
+	"workspaceFolder": "/workspaces/document-generator",
 	"shutdownAction": "stopCompose",
 
 	// Belt and braces with `user: vscode` in the compose file: everything that
@@ -24,7 +24,7 @@
 	// The compose network is external so it can be shared with other projects,
 	// which means it has to exist before compose runs. Creating it is idempotent
 	// in effect; the echo keeps the second run from failing the command.
-	"initializeCommand": "docker network create common_network || echo 'common_network already exists'",
+	"initializeCommand": "docker network create document_generator_network || echo 'document_generator_network already exists'",
 
 	// Two steps:
 	//
