@@ -1,7 +1,9 @@
 # document-generator
 
-Generate a CV from a single Markdown file. You edit one `.md`, the tool produces
-a styled, print-ready document as **HTML**, **PDF** or **MS Word (.docx)**.
+Generate a file with content from a number of source files. A short
+[`data/config.json`](data/config.json) says which section comes from where — a
+span of a Markdown file, or a section of a Word document — and the tool produces one
+styled, print-ready document as **HTML**, **PDF** or **MS Word (.docx)**.
 
 ## Everything you run lives in `run/`
 
@@ -12,7 +14,7 @@ Every command this project asks you to type is a script in [run/](run/), with a
 |---|---|
 | [run/setup.sh](run/setup.sh) | Editable install with the dev extra; `--pdf` adds a local Chromium |
 | [run/build.sh](run/build.sh) | Render the CV — every format, or `-f html\|pdf\|docx` (`-o`, `-t`, …) |
-| [run/validate.sh](run/validate.sh) | Parse and report, write nothing |
+| [run/validate.sh](run/validate.sh) | Assemble and report which file fed which section, write nothing |
 | [run/themes.sh](run/themes.sh) | List HTML/PDF themes |
 | [run/engines.sh](run/engines.sh) | PDF engine status, including the browser server |
 | [run/browser-up.sh](run/browser-up.sh) | Start the Chromium container and wait for it |
@@ -116,18 +118,22 @@ as a permission error.
 ## Usage
 
 ```bash
-run/build.sh                     # data/cv.md -> dist/cv.html, dist/cv.docx, dist/cv.pdf
+run/build.sh                     # data/config.json -> dist/cv.html, .docx, .pdf
 run/build.sh -f html             # -> dist/cv.html
 run/build.sh -f pdf              # -> dist/cv.pdf
 run/build.sh -f docx             # -> dist/cv.docx
 run/build.sh -f html -f docx     # a subset; -f is repeatable
 run/build.sh -o out.pdf
 run/build.sh -t classic          # theme (HTML/PDF only)
-run/build.sh input/other.md      # a different source file
-run/validate.sh                  # parse and report, write nothing
+run/build.sh other/config.json   # a different recipe
+run/build.sh notes/talk.md       # a single Markdown file, no recipe
+run/validate.sh                  # assemble and report, write nothing
 run/themes.sh
 run/engines.sh
 ```
+
+The source argument is a build recipe (`.json`) or a single Markdown file, told
+apart by the suffix, so both fit one argument and neither needs a flag.
 
 With no `-f` you get all three, in the order `html`, `docx`, `pdf`: the same CV
 usually goes out as a PDF and is kept as a `.docx`, so rendering the set is the
@@ -145,8 +151,10 @@ included; prune `dist/hist/` whenever you like — nothing reads it back.
 
 ## The source format
 
-One Markdown file: YAML frontmatter for identity and contact details, Markdown
-below for content.
+Markdown: YAML frontmatter for identity and contact details, Markdown below for
+content. Any number of such files supply the sections, as [the
+recipe](#the-recipe) below decides; the frontmatter of whichever one a span
+starts at the *top* of becomes the CV's header.
 
 ```markdown
 ---
@@ -182,7 +190,6 @@ Rules:
 | `photo:` | Portrait for the header, top right. Path relative to the `.md` file. |
 | Text before the first `##` | Summary paragraph. |
 | `##` | A section (Experience, Skills, Education, …). Order is preserved. |
-| `## Projekte` | Special: filled from the Word project list, see below. |
 | `###` | One entry within a section: a role, a degree, a project. |
 | `*italic line*` right after a `###` | Styled as the entry's date/location line. |
 | Everything else | Plain Markdown — lists (nested too), bold, italic, strikethrough, inline code, fenced code, links, blockquotes, tables, rules. |
@@ -190,38 +197,101 @@ Rules:
 Section names are free-form: rename, reorder or drop them and every output
 format follows.
 
-## The project list comes from Word
+## The recipe
 
-`## Projekte` is the one section whose content is *not* in the Markdown file. It
-is imported from the project list that lives next to the CV — the single `.docx`
-in the same directory whose name contains **Projektliste** (any case) — from the
-section headed **Projekthistorie**, with the formatting it has there:
+A CV, for example, can have content from several other files. The prose is written in Markdown, but the project list
+is maintained in Word and sent to clients from there, so Word stays *its* source
+of truth — retyping it as Markdown would create a second one and lose the layout
+besides. [`data/config.json`](data/config.json) is where that composition is
+written down, and it is the whole of it:
+
+```json
+{
+  "sections": [
+    { "source": "cv.md",                                          "end": "Kenntnisse" },
+    { "source": "*Projektliste*.docx", "begin": "Projekthistorie", "end": "Ausbildung",
+      "title": "Projekte" },
+    { "source": "cv.md",               "begin": "Kenntnisse" }
+  ]
+}
+```
 
 ```
 data/
-  cv.md                                  ## Projekte  ->  imported
-  Bergemann-Projektliste_19_08_2026.docx      "Projekthistorie", one table per project
+  config.json            the recipe above
+  cv.md                  header + Berufserfahrung, Kenntnisse, Ausbildung, Sprachen
+  Projektliste.docx      "Projekthistorie", one table per project
   photo.jpg
 ```
 
-That file is maintained in Word and sent to clients as it is, so Word stays its
-source of truth: edit it there, rebuild, and the CV follows. Whatever stands
-under `## Projekte` in the Markdown file is ignored — put a comment there.
+Three entries, five sections: Berufserfahrung, **Projekte** (from Word),
+Kenntnisse, Ausbildung, Sprachen. Edit either file, rebuild, and the CV follows.
+
+| Key | Meaning |
+|---|---|
+| `sections` | One entry per span, concatenated in the order listed. The only key a recipe needs. |
+| `source` | A file in the recipe's own directory. May be a glob — `*Projektliste*.docx` survives the list being reissued with a new date in its name — and then has to match exactly one file. |
+| `begin` | The headline the span starts at. Matched case-insensitively, with or without its `##`. **Leave it out** and the span starts at the top of the file. |
+| `end` | The headline it stops **before** — that headline belongs to whatever comes next and is not copied. **Leave it out** and the span runs to the end of the file. An `end` that never turns up is an error, not "run to the end": the recipe said where to stop. |
+| `title` | Renames the span's first section. `Projekthistorie` in Word, `Projekte` in the CV. |
+| `output` | The stem the results take: `dist/cv.html`, `dist/cv.docx`, `dist/cv.pdf`. Defaults to that of the file the header came from — `cv.md`, hence `dist/cv.*`. |
+
+### Where the header comes from
+
+There is no key naming a metadata file. **A span that starts at the top of a
+Markdown file brings the header with it** — frontmatter is part of the beginning
+of a document, so the first entry with no `begin` is where `name`, `headline`,
+`contact`, `photo` and the summary come from. Above, that is the first entry,
+which supplies the header *and* Berufserfahrung.
+
+To take a file's header and none of its sections, end at its first heading:
+
+```json
+{ "source": "cv.md", "end": "Berufserfahrung" }
+```
+
+A later entry that also starts at the top contributes only its sections: the CV
+has one name and one summary, and the first entry to supply them is the one that
+does. If no entry starts at the top of a Markdown file, the build fails saying so
+— a CV with no name is not a CV.
+
+### Spans
+
+A **Markdown span is split at its own `##` headings**, the way a single-file CV
+is, so the third entry above contributes three sections, each with its own
+heading and anchor. A **`.docx` span is one section**: imported blocks are
+paragraphs and tables with no headings of their own, so there is nothing to split
+them at — and nothing to name it after, so such an entry needs a `title` if it
+has no `begin`.
+
+Unknown keys are rejected, so a typo fails loudly rather than silently dropping a
+section. A file may be used any number of times, and the spans need not be in the
+source's own order.
+
+Nothing is lost by leaving the recipe out: `run/build.sh notes/talk.md` renders a
+single Markdown file as its own header and sections, as before.
+
+### What an imported Word section keeps
 
 | | |
 |---|---|
-| Which file | The one `.docx` in the CV's directory whose name contains `projektliste`. Word's `~$…` lock file, so an open document does not count as a second match. |
-| Zero or several matches | An error naming them. Guessing would quietly publish a CV built from last year's list. |
-| Which part of it | From the `Projekthistorie` heading to the next paragraph formatted like it (same weight, same size) — a hand-made Word CV has no heading *styles* to go by. |
+| Which part of it | From `begin` to `end`. Without an `end`, to the next paragraph formatted like the heading it started from (same weight, same size) — a hand-made Word CV has no heading *styles* to go by. Without a `begin` there is no shape to compare against either, so the span runs to the `end`, or to the last page if there is none. |
+| Zero or several files match | An error naming them. Guessing would quietly publish a CV built from last year's list. Word's `~$…` lock file never counts, so an open document does not break the build. |
 | Kept | Bold, italic, underline, strikethrough, size, colour, hyperlinks, bullets and their nesting, table columns and widths, whether the table is ruled. |
 | Not kept | Font family, page setup, paragraph spacing — those stay the CV's own, so the imported projects sit in this document rather than importing a second design. |
 
-`run/validate.sh` prints which file was used and how many blocks came out of it,
-which is the thing to check before a build goes out:
+`run/validate.sh` prints which file fed which section, which is the thing to
+check before a build goes out — a recipe resolves globs and headlines, and
+neither is visible in the result:
 
 ```
-data/cv.md: ok - Frank Bergemann, 5 section(s)
+data/config.json: ok - Frank Bergemann, 5 section(s) -> cv.*
+  photo: image/jpeg, 680 kB
+  - Berufserfahrung (berufserfahrung) <- data/cv.md
   - Projekte (projekte) <- 25 block(s) from data/Bergemann-Projektliste_19_08_2026.docx
+  - Kenntnisse (kenntnisse) <- data/cv.md
+  - Ausbildung (ausbildung) <- data/cv.md
+  - Sprachen (sprachen) <- data/cv.md
 ```
 
 All three output formats show the same imported content: HTML and PDF render the
@@ -231,18 +301,19 @@ Word's own bullet styles.
 ## How it fits together
 
 ```
-                                          ┌─ render.py ─> HTML ─┬─> .html
-data/cv.md ────── parser.py ─> CV model ──┤                     └─ pdf/chrome.py ─> .pdf
-  frontmatter        │         (pydantic) │
-  + Markdown         │                    └─ word.py ──────────────────────────────> .docx
-*Projektliste*.docx ─┘
-  "Projekthistorie"    docx_import.py
+data/config.json ─── config.py ──┐            ┌─ render.py ─> HTML ─┬─> .html
+  which span, which file         │            │                     └─ pdf/chrome.py ─> .pdf
+data/cv.md ──────────────────────┼ parser.py ─┤        (pydantic)
+  frontmatter + Markdown         │  CV model  └─ word.py ──────────────────────────────> .docx
+*Projektliste*.docx ─────────────┘
+  "Projekthistorie"   docx_import.py
 ```
 
-- [src/cv_generator/parser.py](src/cv_generator/parser.py) — frontmatter + Markdown → model
+- [src/cv_generator/config.py](src/cv_generator/config.py) — the recipe's schema, and resolving a `source` to one file
+- [src/cv_generator/parser.py](src/cv_generator/parser.py) — the source files → model
 - [src/cv_generator/models.py](src/cv_generator/models.py) — the validated `CV` schema
 - [src/cv_generator/markdown.py](src/cv_generator/markdown.py) — the one Markdown parser both backends share
-- [src/cv_generator/docx_import.py](src/cv_generator/docx_import.py) — the Word project list → blocks in the model
+- [src/cv_generator/docx_import.py](src/cv_generator/docx_import.py) — a Word section → blocks in the model
 - [src/cv_generator/render.py](src/cv_generator/render.py) — model → self-contained HTML
 - [src/cv_generator/word.py](src/cv_generator/word.py) — model → `.docx` (see `WordTheme`)
 - [src/cv_generator/ooxml.py](src/cv_generator/ooxml.py) — the OOXML bits python-docx has no API for
@@ -322,11 +393,11 @@ mirrored in `WordTheme` ([word.py](src/cv_generator/word.py)). Themes given with
 
 ```python
 from pathlib import Path
-from cv_generator import WordRenderer, WordTheme, parse_cv_file
+from cv_generator import WordRenderer, WordTheme, load_cv
 
-WordRenderer(WordTheme(body_font="Georgia", accent="7A2E2E")).render(
-    parse_cv_file(Path("data/cv.md")), Path("dist/cv.docx")
-)
+cv, name = load_cv(Path("data/config.json"))  # or a plain .md
+theme = WordTheme(body_font="Georgia", accent="7A2E2E")
+WordRenderer(theme).render(cv, Path(f"dist/{name}.docx"))
 ```
 
 Not supported: images inside section Markdown (the header photo is; `![...]()`

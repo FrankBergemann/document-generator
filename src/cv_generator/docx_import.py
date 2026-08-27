@@ -23,10 +23,12 @@ each ``basedOn`` chain. Word documents lean on both -- the list items in the
 sample file use a heading style and then switch bold off run by run -- so
 reading only one of the two gets the answer wrong.
 
-Where a section ends is decided by formatting, because a hand-made Word CV
-usually has no heading *styles* at all, only bold, larger text: the imported
-section runs from its heading to the next top-level paragraph that looks exactly
-like that heading (same weight, same size), or to the end of the document.
+Where a section ends is either stated or worked out. The build recipe may name
+the heading the import stops before, which is the unambiguous answer; without one
+the end is decided by *formatting*, because a hand-made Word CV usually has no
+heading *styles* at all, only bold, larger text: the section then runs from its
+heading to the next top-level paragraph that looks exactly like that heading
+(same weight, same size), or to the end of the document.
 
 The private-API reads (``paragraph._p``, ``table._tbl``, ``cell._tc``) stay here
 rather than moving to :mod:`cv_generator.ooxml`. That module exists because
@@ -68,47 +70,15 @@ _Block = WordParagraph | WordTable
 _T = TypeVar("_T")
 
 
-def find_docx(directory: Path, marker: str) -> Path:
-    """Find the one ``.docx`` in ``directory`` whose name contains ``marker``.
-
-    Matching is case-insensitive and ignores the extension's case too, so
-    ``Projektliste_2026.DOCX`` is found by ``projektliste``.
-
-    Raises:
-        CVParseError: if the directory is missing, or if no file or more than
-            one file matches -- picking one of several would silently publish a
-            CV built from last year's list.
-    """
-    if not directory.is_dir():
-        raise CVParseError(f"{directory} is not a directory")
-
-    needle = marker.casefold()
-    matches = sorted(
-        entry
-        for entry in directory.iterdir()
-        if entry.is_file()
-        and entry.suffix.casefold() == DOCX_SUFFIX
-        and not entry.name.startswith(LOCK_PREFIX)
-        and needle in entry.stem.casefold()
-    )
-
-    if not matches:
-        raise CVParseError(f"no {DOCX_SUFFIX} file in {directory} has {marker!r} in its name")
-    if len(matches) > 1:
-        names = ", ".join(match.name for match in matches)
-        raise CVParseError(
-            f"{len(matches)} {DOCX_SUFFIX} files in {directory} have {marker!r} in their name "
-            f"({names}); keep exactly one"
-        )
-    return matches[0]
-
-
-def load_section(path: Path, heading: str) -> list[RichBlock]:
+def load_section(path: Path, heading: str | None = None, end: str | None = None) -> list[RichBlock]:
     """Import the blocks under ``heading`` from the Word document at ``path``.
 
     Args:
         heading: The heading's text, matched case-insensitively against the
-            document's top-level paragraphs.
+            document's top-level paragraphs. ``None`` starts at the first block,
+            which is the whole document when ``end`` is absent too.
+        end: The heading the import stops *before*, matched the same way. Without
+            it the end is found by formatting instead -- see :func:`_section_of`.
 
     Returns:
         The section's paragraphs and tables, in document order. Blank paragraphs
@@ -127,7 +97,7 @@ def load_section(path: Path, heading: str) -> list[RichBlock]:
 
     imported = [
         _convert(block, numbering)
-        for block in _section_of(blocks, heading, path)
+        for block in _section_of(blocks, heading, end, path)
         if not _is_blank(block)
     ]
     if not imported:
@@ -166,24 +136,56 @@ def _iter_blocks(container: BaseOxmlElement, parent: ProvidesStoryPart) -> Itera
             yield WordTable(child, parent)
 
 
-def _section_of(blocks: Sequence[_Block], heading: str, path: Path) -> list[_Block]:
-    wanted = heading.strip().casefold()
-    start: int | None = None
+def _section_of(
+    blocks: Sequence[_Block], heading: str | None, end: str | None, path: Path
+) -> list[_Block]:
+    """The blocks between ``heading`` and where the section ends.
+
+    Named or guessed, in that order. A named ``end`` is another heading's text
+    and says exactly where to stop, which is what a build recipe can state.
+    Without one the end is found by *formatting*: a hand-made Word CV has no
+    ``Heading 1`` anywhere -- its headings are bold, 12pt, no style at all -- so
+    the import runs to the next top-level paragraph shaped like the one it
+    started from. With no ``heading`` to learn a shape from there is nothing to
+    guess with, so the import simply runs to the end of the document.
+    """
+    # -1 rather than 0, because the search below starts *after* the heading and
+    # a headless import has to start at the very first block.
+    start = -1
     shape: _HeadingShape | None = None
 
-    for index, block in enumerate(blocks):
-        if isinstance(block, WordParagraph) and block.text.strip().casefold() == wanted:
-            start, shape = index, _shape_of(block)
-            break
-    if start is None or shape is None:
-        raise CVParseError(f"{path}: no heading {heading!r} found")
+    if heading is not None:
+        wanted = heading.strip().casefold()
+        for index, block in enumerate(blocks):
+            if isinstance(block, WordParagraph) and block.text.strip().casefold() == wanted:
+                start, shape = index, _shape_of(block)
+                break
+        else:
+            raise CVParseError(f"{path}: no heading {heading!r} found")
 
+    stop = None if end is None else end.strip().casefold()
     section: list[_Block] = []
+    reached_end = False
     for block in blocks[start + 1 :]:
-        if isinstance(block, WordParagraph) and _is_heading(block, shape):
+        if isinstance(block, WordParagraph) and _ends_section(block, stop, shape):
+            reached_end = True
             break
         section.append(block)
+
+    # A named end that never turns up is a mistake in the recipe, not a section
+    # that happens to run to the last page: silently importing the rest of the
+    # document would put another section's content under this heading.
+    if stop is not None and not reached_end:
+        raise CVParseError(f"{path}: no heading {end!r} follows {heading!r}")
     return section
+
+
+def _ends_section(paragraph: WordParagraph, stop: str | None, shape: _HeadingShape | None) -> bool:
+    if stop is not None:
+        return paragraph.text.strip().casefold() == stop
+    # No shape to compare against: the import began at the top of the document,
+    # so there is no "another heading like this one" to look for.
+    return shape is not None and _is_heading(paragraph, shape)
 
 
 def _shape_of(paragraph: WordParagraph) -> _HeadingShape:
@@ -444,4 +446,4 @@ def _child_where(
     return None
 
 
-__all__ = ["DOCX_SUFFIX", "LOCK_PREFIX", "find_docx", "load_section"]
+__all__ = ["DOCX_SUFFIX", "LOCK_PREFIX", "load_section"]

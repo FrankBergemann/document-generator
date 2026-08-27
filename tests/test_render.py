@@ -6,9 +6,9 @@ import pytest
 
 from cv_generator.errors import RenderError
 from cv_generator.models import CV, Contact, Link
-from cv_generator.parser import parse_cv, parse_cv_file
+from cv_generator.parser import load_cv, parse_cv
 from cv_generator.render import Renderer
-from tests.conftest import PROJECTS_MD
+from tests.conftest import PROJECTS_CONFIG, PROJECTS_MD, write_config
 from tests.support import PROJEKTLISTE_NAME, SAMPLE_PROJECTS, Project, write_projektliste
 
 
@@ -143,9 +143,8 @@ class TestImportedBlocks:
             tmp_path / PROJEKTLISTE_NAME,
             [Project(period="2026", role="<script>alert(1)</script>", customer="a & b")],
         )
-        path = tmp_path / "cv.md"
-        path.write_text(PROJECTS_MD, encoding="utf-8")
-        html = renderer.render_html(parse_cv_file(path))
+        (tmp_path / "cv.md").write_text(PROJECTS_MD, encoding="utf-8")
+        html = renderer.render_html(load_cv(write_config(tmp_path, PROJECTS_CONFIG)).cv)
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html
         assert "a &amp; b" in html

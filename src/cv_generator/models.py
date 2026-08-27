@@ -132,11 +132,16 @@ RichBlock = Annotated[RichParagraph | RichTable, Field(discriminator="kind")]
 
 
 class Section(BaseModel):
-    """One ``##`` section of the Markdown body, with its body as Markdown.
+    """One section of the target document, with its body as Markdown.
 
     A section whose content came from an existing ``.docx`` carries ``blocks``
-    instead, with ``markdown`` empty and ``imported_from`` naming the file.
-    Exactly one of the two is ever populated, so a backend cannot render both.
+    instead, with ``markdown`` empty. Exactly one of the two is ever populated,
+    so a backend cannot render both.
+
+    ``source`` names the file the content was copied out of. A document built
+    from a ``config.json`` draws its sections from several files, so "where did
+    this one come from?" is a question ``validate`` has to be able to answer; it
+    is ``None`` when there is nothing to disambiguate.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -145,7 +150,7 @@ class Section(BaseModel):
     slug: str
     markdown: str
     blocks: list[RichBlock] = Field(default_factory=list)
-    imported_from: str | None = None
+    source: str | None = None
 
 
 class CV(BaseModel):

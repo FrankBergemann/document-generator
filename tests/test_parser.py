@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from cv_generator.errors import CVParseError
-from cv_generator.models import CV, RichTable
+from cv_generator.models import CV
 from cv_generator.parser import (
     load_photo,
     parse_cv,
@@ -15,7 +15,7 @@ from cv_generator.parser import (
     split_sections,
 )
 from tests.conftest import PROJECTS_MD
-from tests.support import DATA_DIR, PROJEKTLISTE_NAME, SAMPLE_PROJECTS, write_projektliste
+from tests.support import DATA_DIR, PROJEKTLISTE_NAME, write_projektliste
 
 
 class TestSplitFrontmatter:
@@ -196,69 +196,31 @@ class TestPhoto:
             parse_cv_file(source)
 
 
-class TestImportedProjects:
-    """`## Projekte` takes its content from the Word project list, not the .md."""
+class TestSingleFileHasNoImports:
+    """A lone `.md` is the whole document; only a recipe reaches other files."""
 
-    def test_section_carries_the_imported_blocks(self, projects_cv: CV) -> None:
-        projects = projects_cv.section("projekte")
-        assert projects is not None
-        assert [type(block) for block in projects.blocks] == [RichTable] * len(SAMPLE_PROJECTS)
-
-    def test_markdown_body_of_the_section_is_dropped(self, projects_cv: CV) -> None:
-        projects = projects_cv.section("projekte")
-        assert projects is not None
-        # Emptied rather than kept: two sources for one section is how a stale
-        # paragraph ends up in whichever output format happens to prefer it.
-        assert projects.markdown == ""
-        assert all("darf nicht" not in section.markdown for section in projects_cv.sections)
-
-    def test_the_source_file_is_recorded(self, projects_cv: CV) -> None:
-        projects = projects_cv.section("projekte")
-        assert projects is not None
-        assert projects.imported_from is not None
-        assert projects.imported_from.endswith(PROJEKTLISTE_NAME)
-
-    def test_other_sections_stay_markdown(self, projects_cv: CV) -> None:
-        skills = projects_cv.section("kenntnisse")
-        assert skills is not None
-        assert skills.blocks == []
-        assert skills.markdown == "- Python"
-
-    def test_a_cv_without_the_section_needs_no_project_list(self, tmp_path: Path) -> None:
-        path = tmp_path / "cv.md"
-        path.write_text("---\nname: Ada\n---\n\n## Kenntnisse\n\n- Python\n", encoding="utf-8")
-        assert parse_cv_file(path).sections
-
-    def test_missing_project_list_is_an_error_naming_the_convention(self, tmp_path: Path) -> None:
+    def test_every_section_is_markdown(self, tmp_path: Path) -> None:
         path = tmp_path / "cv.md"
         path.write_text(PROJECTS_MD, encoding="utf-8")
-        with pytest.raises(CVParseError, match=r"'projektliste' document: no \.docx file"):
-            parse_cv_file(path)
+        cv = parse_cv_file(path)
+        assert [s.title for s in cv.sections] == ["Berufserfahrung", "Projekte", "Kenntnisse"]
+        assert all(section.blocks == [] for section in cv.sections)
 
-    def test_two_project_lists_are_an_error(self, tmp_path: Path) -> None:
-        write_projektliste(tmp_path / "Projektliste_alt.docx")
-        write_projektliste(tmp_path / "Projektliste_neu.docx")
+    def test_a_projekte_section_is_no_longer_special(self, tmp_path: Path) -> None:
+        # It used to be filled from a *Projektliste*.docx next to the file, by
+        # name alone. Composition is a recipe's job now, so the heading is just a
+        # heading -- and a directory holding such a document changes nothing.
+        write_projektliste(tmp_path / PROJEKTLISTE_NAME)
         path = tmp_path / "cv.md"
         path.write_text(PROJECTS_MD, encoding="utf-8")
-        with pytest.raises(CVParseError, match="keep exactly one"):
-            parse_cv_file(path)
-
-    def test_error_names_the_cv_file(self, tmp_path: Path) -> None:
-        path = tmp_path / "lebenslauf.md"
-        path.write_text(PROJECTS_MD, encoding="utf-8")
-        with pytest.raises(CVParseError, match=r"lebenslauf\.md"):
-            parse_cv_file(path)
-
-    def test_lookup_is_relative_to_the_cv_file_not_the_cwd(
-        self,
-        projects_path: Path,
-        tmp_path_factory: pytest.TempPathFactory,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.chdir(tmp_path_factory.mktemp("elsewhere"))
-        projects = parse_cv_file(projects_path).section("projekte")
+        projects = parse_cv_file(path).section("projekte")
         assert projects is not None
-        assert projects.blocks
+        assert projects.blocks == []
+        assert "darf nicht" in projects.markdown
+
+    def test_no_section_records_a_source(self, minimal_cv: CV) -> None:
+        # There is only one file, so there is nothing to disambiguate.
+        assert all(section.source is None for section in minimal_cv.sections)
 
 
 class TestParseCVFile:

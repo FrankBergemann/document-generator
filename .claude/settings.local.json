@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(run/format.sh)",
+      "Bash(run/check.sh)"
+    ]
+  }
+}

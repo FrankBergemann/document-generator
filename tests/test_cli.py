@@ -7,7 +7,7 @@ import pytest
 
 from cv_generator.cli import main
 from cv_generator.pdf import BROWSER_WS_ENV
-from tests.conftest import PROJECTS_MD
+from tests.conftest import PROJECTS_CONFIG, PROJECTS_MD, write_config
 from tests.support import (
     CHROME_AVAILABLE,
     LOCAL_CHROME_INSTALLED,
@@ -126,6 +126,45 @@ class TestBuildEveryFormat:
         assert "takes a single --format" in capsys.readouterr().err
 
 
+class TestBuildFromARecipe:
+    """A `.json` source assembles the document; a `.md` source is the document."""
+
+    def test_the_output_is_named_by_the_recipe_not_by_the_recipe_file(
+        self,
+        projects_path: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Without this every project would ship a dist/config.html.
+        monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+        assert main(["build", str(projects_path), "-f", "html"]) == 0
+        assert (Path("dist") / "cv.html").is_file()
+
+    def test_output_overrides_that_name(
+        self,
+        projects_dir: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        source = write_config(projects_dir, PROJECTS_CONFIG | {"output": "lebenslauf"})
+        monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+        assert main(["build", str(source), "-f", "html"]) == 0
+        assert (Path("dist") / "lebenslauf.html").is_file()
+
+    def test_every_source_reaches_the_output(self, tmp_path: Path, projects_path: Path) -> None:
+        out = tmp_path / "cv.html"
+        assert main(["build", str(projects_path), "-o", str(out)]) == 0
+        html = out.read_text(encoding="utf-8")
+        assert "Land Schleswig-Holstein" in html  # from the .docx
+        assert "Python" in html  # from the .md
+        assert "darf nicht" not in html  # a span no entry asked for
+
+    def test_out_still_wins(self, tmp_path: Path, projects_path: Path) -> None:
+        out = tmp_path / "somewhere" / "other.html"
+        assert main(["build", str(projects_path), "-o", str(out)]) == 0
+        assert out.is_file()
+
+
 class TestBuildWithPhoto:
     def test_html_embeds_the_photo(self, tmp_path: Path, photo_path: Path) -> None:
         out = tmp_path / "cv.html"
@@ -235,24 +274,50 @@ class TestValidate:
         assert main(["validate", str(source)]) == 1
         assert "cannot read photo" in capsys.readouterr().err
 
-    def test_reports_the_project_list_it_imported_from(
+    def test_reports_the_file_behind_each_section(
         self, projects_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # Which project list was picked up is the thing to check before a build:
-        # the file is found by a naming convention, not named in the CV.
+        # A recipe resolves globs and headlines, and neither is visible in the
+        # result, so which file fed which section is the thing to check before a
+        # build goes out.
         assert main(["validate", str(projects_path)]) == 0
         out = capsys.readouterr().out
         assert "Projekte (projekte)" in out
         assert PROJEKTLISTE_NAME in out
         assert "block(s) from" in out
+        assert "Kenntnisse (kenntnisse) <- " in out
+        assert "cv.md" in out
 
-    def test_missing_project_list_is_a_clean_error(
+    def test_reports_the_name_the_outputs_will_take(
+        self, projects_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The recipe is called config.json and the result is not.
+        assert main(["validate", str(projects_path)]) == 0
+        assert "-> cv.*" in capsys.readouterr().out
+
+    def test_a_broken_recipe_is_a_clean_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        source = tmp_path / "cv.md"
-        source.write_text(PROJECTS_MD, encoding="utf-8")
+        (tmp_path / "cv.md").write_text(PROJECTS_MD, encoding="utf-8")
+        source = write_config(
+            tmp_path,
+            {
+                "sections": [
+                    {"source": "cv.md", "end": "Berufserfahrung"},
+                    {"source": "*Projektliste*.docx", "begin": "Projekthistorie"},
+                ]
+            },
+        )
         assert main(["validate", str(source)]) == 1
-        assert "'projektliste' document" in capsys.readouterr().err
+        assert "Projektliste" in capsys.readouterr().err
+
+    def test_invalid_json_is_a_clean_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        bad = tmp_path / "config.json"
+        bad.write_text("{not json", encoding="utf-8")
+        assert main(["validate", str(bad)]) == 1
+        assert "invalid JSON" in capsys.readouterr().err
 
     def test_invalid_file_exits_nonzero(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Render the CV. Everything after the script name goes to `document-generator build`.
 #
-#   run/build.sh                               # data/cv.md -> dist/cv.{html,docx,pdf}
+#   run/build.sh                               # data/config.json -> dist/cv.{html,docx,pdf}
 #   run/build.sh -f html                       # -> dist/cv.html
 #   run/build.sh -f pdf                        # -> dist/cv.pdf   (needs a browser)
 #   run/build.sh -f docx                       # -> dist/cv.docx
 #   run/build.sh -f html -f docx               # a subset; -f is repeatable
-#   run/build.sh input/other.md -o out.pdf -f pdf
+#   run/build.sh other/config.json             # a different recipe
+#   run/build.sh notes/talk.md -o out.pdf -f pdf   # a single .md, no recipe
 #   run/build.sh -t classic                    # theme (HTML/PDF only)
+#
+# The source is a build recipe (data/config.json: which file each section is
+# copied out of) or a single Markdown file, told apart by the suffix.
 #
 # With no -f the CV is rendered in every format. A format that fails does not
 # stop the others -- with no browser reachable you still get the .html and the
@@ -25,8 +29,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 HIST_DIR="dist/hist"
 
-# The CLI resolves the output path itself (-o, else dist/<source stem>.<format>),
-# so its "wrote <path>" line is the one place that path is known. Reading it back
+# The CLI resolves the output path itself (-o, else dist/<name>.<format>, where
+# the name comes from the recipe rather than from the recipe file -- a recipe is
+# called config.json and its result is not), so its "wrote <path>" line is the
+# one place that path is known. Reading it back
 # keeps a single source of truth; recomputing the same rule here would be a
 # second one, free to drift the moment the CLI's default changes.
 #

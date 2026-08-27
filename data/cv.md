@@ -30,12 +30,6 @@ suchst du. Alles oberhalb der ersten `##`-Überschrift landet hier.
 - Was gebaut wurde und welchen Unterschied es gemacht hat.
 - Zweiter Punkt, ebenfalls mit konkretem Ergebnis.
 
-## Projekte
-
-<!-- Inhalt kommt aus der Projektliste (data/*Projektliste*.docx), Abschnitt
-     "Projekthistorie". Was hier steht, wird nicht gerendert. -->
-
-
 ## Kenntnisse
 
 - **Sprachen:** Python, TypeScript, SQL

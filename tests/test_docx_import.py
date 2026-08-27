@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cv_generator.docx_import import find_docx, load_section
+from cv_generator.docx_import import load_section
 from cv_generator.errors import CVParseError
 from cv_generator.models import RichBlock, RichParagraph, RichRun, RichTable
 from tests.support import (
@@ -55,43 +55,35 @@ def texts(blocks: list[RichBlock]) -> list[str]:
     return top_level + [paragraph.text() for paragraph in cell_paragraphs(blocks)]
 
 
-class TestFindDocx:
-    def test_finds_the_one_match(self, tmp_path: Path) -> None:
-        (tmp_path / "Bergemann-Projektliste_2026.docx").write_bytes(b"")
-        (tmp_path / "cv.md").write_text("---\nname: A\n---\n", encoding="utf-8")
-        assert find_docx(tmp_path, "projektliste").name == "Bergemann-Projektliste_2026.docx"
+class TestNamedEnd:
+    """A build recipe may say which heading the import stops before."""
 
-    def test_marker_and_extension_are_case_insensitive(self, tmp_path: Path) -> None:
-        (tmp_path / "PROJEKTLISTE.DOCX").write_bytes(b"")
-        assert find_docx(tmp_path, "projektliste").name == "PROJEKTLISTE.DOCX"
+    def test_the_end_heading_is_not_imported(self, projektliste: Path) -> None:
+        blocks = load_section(projektliste, "Projekthistorie", "Ausbildung")
+        assert "Ausbildung" not in texts(blocks)
+        assert AFTER_SECTION not in texts(blocks)
+        assert len(tables(blocks)) == len(SAMPLE_PROJECTS)
 
-    def test_other_documents_are_ignored(self, tmp_path: Path) -> None:
-        (tmp_path / "Projektliste.docx").write_bytes(b"")
-        (tmp_path / "Anschreiben.docx").write_bytes(b"")
-        (tmp_path / "Projektliste.pdf").write_bytes(b"")
-        assert find_docx(tmp_path, "projektliste").name == "Projektliste.docx"
+    def test_it_overrides_the_formatting_rule(self, projektliste: Path) -> None:
+        # Left to itself the import would stop at "Ausbildung", which is shaped
+        # like the heading it started from. Naming a later paragraph carries that
+        # heading in, which is how a recipe overrules the guess.
+        blocks = load_section(projektliste, "Projekthistorie", AFTER_SECTION)
+        assert "Ausbildung" in texts(blocks)
+        assert AFTER_SECTION not in texts(blocks)
 
-    def test_word_lock_file_is_not_a_second_match(self, tmp_path: Path) -> None:
-        # Word writes this next to a document it has open. Counting it would
-        # break every build for as long as the file is being edited.
-        (tmp_path / "Projektliste.docx").write_bytes(b"")
-        (tmp_path / "~$ojektliste.docx").write_bytes(b"")
-        assert find_docx(tmp_path, "projektliste").name == "Projektliste.docx"
+    def test_it_is_matched_case_insensitively(self, projektliste: Path) -> None:
+        assert load_section(projektliste, "Projekthistorie", "AUSBILDUNG")
 
-    def test_no_match_names_the_directory_and_the_marker(self, tmp_path: Path) -> None:
-        with pytest.raises(CVParseError, match=r"no \.docx file in .* 'projektliste'"):
-            find_docx(tmp_path, "projektliste")
+    def test_an_end_that_never_comes_is_an_error(self, projektliste: Path) -> None:
+        # Not "run to the end of the document": the recipe said where to stop,
+        # so importing the rest would put another section's content in this one.
+        with pytest.raises(CVParseError, match="no heading 'Publikationen' follows"):
+            load_section(projektliste, "Projekthistorie", "Publikationen")
 
-    def test_several_matches_list_them(self, tmp_path: Path) -> None:
-        # Silently picking one would publish a CV built from last year's list.
-        (tmp_path / "Projektliste_alt.docx").write_bytes(b"")
-        (tmp_path / "Projektliste_neu.docx").write_bytes(b"")
-        with pytest.raises(CVParseError, match=r"Projektliste_alt\.docx, Projektliste_neu\.docx"):
-            find_docx(tmp_path, "projektliste")
-
-    def test_missing_directory(self, tmp_path: Path) -> None:
-        with pytest.raises(CVParseError, match="is not a directory"):
-            find_docx(tmp_path / "nope", "projektliste")
+    def test_an_end_before_the_beginning_does_not_count(self, projektliste: Path) -> None:
+        with pytest.raises(CVParseError, match="no heading 'Profil' follows"):
+            load_section(projektliste, "Projekthistorie", "Profil")
 
 
 class TestSectionBoundaries:

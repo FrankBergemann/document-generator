@@ -1,8 +1,10 @@
 # document-generator
 
-CLI that turns one Markdown file (YAML frontmatter + Markdown body) into a styled
-CV as HTML, PDF or MS Word. See [README.md](README.md) for the source format and
-usage.
+CLI that assembles a styled CV as HTML, PDF or MS Word from the files it is
+written in: [data/config.json](data/config.json) lists, per section, the source
+file and the headlines bounding the span to copy. Sources are `.md` (YAML
+frontmatter + Markdown body) or `.docx`. A single `.md` still builds on its own,
+with no recipe. See [README.md](README.md) for the source format and usage.
 
 ## Commands
 
@@ -24,11 +26,12 @@ run/lint.sh                     # ruff check
 run/format.sh                   # ruff format ('--check' to only report)
 run/typecheck.sh                # mypy, strict, covers src/ and tests/
 run/check.sh                    # all four, in CI's order
-run/build.sh                    # data/cv.md -> dist/cv.{html,docx,pdf}
+run/build.sh                    # data/config.json -> dist/cv.{html,docx,pdf}
 run/build.sh -f html            # one format; -f is repeatable
 run/build.sh -f pdf             # needs chromium, see below
 run/build.sh -f docx
-run/validate.sh
+run/build.sh notes/talk.md      # a single .md, no recipe
+run/validate.sh                 # names the file behind each section
 ```
 
 Conventions the scripts follow, worth keeping:
@@ -39,7 +42,9 @@ Conventions the scripts follow, worth keeping:
   result to `dist/hist/<name>-<timestamp>.<ext>`. It learns the paths it just
   archived by reading the CLI's own `wrote <path>` lines -- one per format, since
   a `-f`-less build renders all of them -- because the CLI is what resolves them
-  (`-o`, else `dist/<source stem>.<format>`). Re-deriving that rule in bash would
+  (`-o`, else `dist/<name>.<format>`, where the name comes from the recipe's
+  `output` key and *not* from the recipe file, or every project would ship a
+  `dist/config.html`). Re-deriving that rule in bash would
   be a second source of truth that goes stale the moment the default changes -- so
   if you change what `build` prints on stdout, that parse is the thing that
   breaks. It also keeps the CLI's exit code instead of letting `set -e` end the
@@ -132,16 +137,24 @@ in Acrobat or Word on the host. Windows locks it, the mount reports EACCES, and
 ## Architecture
 
 ```
-                                          ┌─ render.py ─> HTML ─┬─> .html
-cv.md ─────────── parser.py ─> CV model ──┤                     └─ pdf/chrome.py ─> .pdf
-                     │         (pydantic) │
-                     │                    └─ word.py ──────────────────────────────> .docx
-*Projektliste*.docx ─┘
-  "Projekthistorie"    docx_import.py
+config.json ─── config.py ──┐            ┌─ render.py ─> HTML ─┬─> .html
+  which span, which file    │            │                     └─ pdf/chrome.py ─> .pdf
+cv.md ──────────────────────┼ parser.py ─┤        (pydantic)
+                            │  CV model  └─ word.py ──────────────────────────────> .docx
+*Projektliste*.docx ────────┘
+  "Projekthistorie"  docx_import.py
 ```
 
 Each stage only knows the one before it. Adding an output format, a theme or a
-CV section touches exactly one place.
+CV section touches exactly one place — and a section is a line of JSON, not code.
+
+`config.py` is the recipe's schema plus `resolve_source` (a `source` value → the
+one file it names); `parser.py` is the only stage that reads source files, so the
+backends see one finished model and never learn how many files went into it.
+`load_cv(path)` is the single entry point both `build` and `validate` use: it
+dispatches on the suffix (`.json` → recipe, else a lone `.md`) and returns the CV
+together with the stem its outputs take. That stem is the recipe's `output`, *not*
+the recipe file's name — `dist/config.html` would be nobody's CV.
 
 ## Conventions that matter here
 
@@ -159,9 +172,11 @@ CV section touches exactly one place.
   below) and lets `.docx` embed the same image. Accepted formats are the
   intersection of what both backends handle — PNG, JPEG, GIF, sniffed from the
   content — so nothing can render in one output format and vanish from another.
-- **Frontmatter rejects unknown keys** (`extra="forbid"` on every model). A typo
-  in `cv.md` must fail loudly rather than be silently dropped. Keep it that way
-  when adding fields.
+- **Frontmatter and `config.json` reject unknown keys** (`extra="forbid"` on every
+  model, in [models.py](src/cv_generator/models.py) and
+  [config.py](src/cv_generator/config.py) alike). A typo must fail loudly rather
+  than be silently dropped — a mistyped recipe key would otherwise render a
+  document with a section missing. Keep it that way when adding fields.
 - **Errors raised on purpose subclass `CVError`** ([errors.py](src/cv_generator/errors.py)).
   `cli.main` catches `CVError` and turns it into a one-line stderr message with
   exit code 1. Anything not worth that treatment should not be a `CVError`.
@@ -170,9 +185,13 @@ CV section touches exactly one place.
   theme author cannot accidentally escape CSS (`>` → `&gt;` breaks child
   selectors) or double-escape rendered Markdown. Autoescape stays on for
   everything from `cv.md`.
-- **One section is imported, and it is the only exception to the rule above.**
-  `## Projekte` is filled from the Word project list next to the CV, not from
-  `cv.md`; see *The imported project list* below.
+- **A `.docx`-sourced section is the only exception to the rule above.** It
+  carries `blocks` instead of Markdown; see *Imported Word sections* below.
+- **Composition lives in the recipe, never in the code.** Which section comes
+  from which file is `config.json`'s business. There are no hard-coded section
+  names, filename markers or headings left in `parser.py` — that is exactly what
+  the three `PROJECTS_*` constants used to be, and generalising them away is why
+  `config.py` exists. Do not add a "special" section back.
 - **PDF page geometry belongs to the CSS, not the engine.** `chrome.py` passes
   `prefer_css_page_size` and zero margins so `@page` in the theme wins; otherwise
   the HTML preview and the PDF drift apart. If you change `@page`, re-check
@@ -194,28 +213,51 @@ CV section touches exactly one place.
   has to list top, left, bottom, right in that order. `test_word.py` asserts both
   kinds of ordering, because neither is visible in the output.
 
-## The imported project list
+## The recipe
 
-`## Projekte` takes its content from the one `.docx` in the CV's directory whose
-name contains "projektliste", section "Projekthistorie". The list is maintained
-in Word and sent to clients from there, so Word is its source of truth and
-retyping it as Markdown would create a second one. Everything about the
-convention -- which section, which filename marker, which heading -- is three
-constants at the top of [parser.py](src/cv_generator/parser.py); the mechanism is
-[docx_import.py](src/cv_generator/docx_import.py).
+[config.py](src/cv_generator/config.py) is the schema; `parser.build_cv` is the
+assembly. A `sections` entry copies one span of one file:
 
-The section's Markdown body is emptied on purpose (`markdown=""`), so no backend
-can render both sources. `Section.blocks` and `Section.markdown` are never both
-populated -- keep it that way, or a stale paragraph will surface in whichever
-output format happens to prefer one over the other.
+- **`end` is exclusive, for both source types.** The span stops *before* that
+  headline, so `end` names what comes next. Uniform on purpose — the natural
+  reading differs between a `.md` (where a heading delimits a section) and a
+  `.docx` (where it delimits an import), and two meanings for one key would be a
+  trap. An `end` that never turns up is an error, not "run to the end of the
+  file": the recipe stated where to stop, so importing the rest would put another
+  section's content under this heading.
+- **A Markdown span is split at its `##` headings; a `.docx` span is not.**
+  Imported blocks have no headings to split at. That asymmetry is what lets three
+  entries describe the five-section sample document.
+- **`source` may be a glob, and then has to match exactly one file.** The real
+  project list carries a date in its name, so a literal name goes stale every
+  time it is reissued; that is what the old `find_docx` marker convention was for
+  and `resolve_source` now generalises. Matching several is an error, not a pick
+  — guessing would publish a CV built from last year's list. Word's `~$…` lock
+  file never counts, or having the document open would break every build,
+  exactly when someone is most likely to rebuild.
+- **The `output` name comes from the recipe, not from the recipe file.** Every
+  project's recipe is called `config.json`; `dist/config.html` would be nobody's
+  CV. `load_cv` returns the CV and that name together for this reason.
+- **Slugs are deduplicated across the whole document** (`_Slugger`), not per
+  file. Two sources easily use the same heading, and slugs are the HTML anchors.
 
-Four things that look arbitrary and are not:
+## Imported Word sections
 
-- **The section's end is found by formatting, not by a style.** A hand-made Word
-  CV has no `Heading 1` anywhere: its headings are bold, 12pt, no style at all.
-  So the import stops at the next paragraph whose first run matches the
-  `Projekthistorie` heading's *weight and size*. Colour is deliberately excluded
-  -- in the real file the headings differ there.
+A `.docx` entry's content arrives as `blocks` and its `markdown` is emptied on
+purpose (`markdown=""`), so no backend can render both sources. `Section.blocks`
+and `Section.markdown` are never both populated -- keep it that way, or a stale
+paragraph will surface in whichever output format happens to prefer one over the
+other. The mechanism is [docx_import.py](src/cv_generator/docx_import.py).
+
+Three things that look arbitrary and are not:
+
+- **Without an `end`, the section's end is found by formatting, not by a style.**
+  A hand-made Word CV has no `Heading 1` anywhere: its headings are bold, 12pt,
+  no style at all. So the import stops at the next paragraph whose first run
+  matches the start heading's *weight and size*. Colour is deliberately excluded
+  -- in the real file the headings differ there. A recipe that names an `end`
+  overrules this guess; the fallback is what keeps a source with irregular
+  headings usable at all.
 - **Formatting is resolved, not read off the run.** Direct `rPr`, then the
   character style, then the paragraph style, each up its `basedOn` chain. The
   real bullets use a *heading* style and switch bold off run by run
@@ -225,9 +267,6 @@ Four things that look arbitrary and are not:
 - **Blank paragraphs are dropped between blocks and kept inside cells.** Between
   two tables they are Word's way of stopping the tables from merging; inside a
   cell they are the layout.
-- **Word's `~$…` lock file is skipped in discovery.** It is a real `.docx` by
-  name, so counting it would make every build fail while the list is open in
-  Word -- exactly when someone is most likely to rebuild.
 
 Font family, page setup and paragraph spacing are *not* imported: they stay the
 CV's own, or the projects would drag a second document's design into the CV. In
@@ -238,9 +277,7 @@ proportions scaled to this page (`WordTheme.content_width_mm`); in HTML they get
 The fixture is *built*, not committed: `write_projektliste` in
 [tests/support.py](tests/support.py) writes a document with the real one's shape
 (bold 12pt headings, per-project tables, direct `numPr` bullets, a section before
-and after the imported one). A committed `.docx` would be an opaque blob. Note
-`data/cv.md` now needs `data/*Projektliste*.docx` to parse at all -- the test
-that parses the repository sample fails without it.
+and after the imported one). A committed `.docx` would be an opaque blob.
 
 ## Word output specifics
 
@@ -276,12 +313,16 @@ the `requires_chromium` marker, live in [tests/support.py](tests/support.py).
 - `tests/data/photo.md` + `portrait.png` (120×160, so 3:4) — the photo path.
   Deliberately separate: `minimal.md` and `rich.md` stay photo-free so the
   photoless header keeps its coverage.
-- The `projects_cv` fixture in [tests/conftest.py](tests/conftest.py) — a CV with
-  a `## Projekte` section next to a generated project list. None of the files in
-  `tests/data/` has such a section, which is what keeps the plain Markdown path
-  covered; add one there and every one of those tests starts needing a `.docx`.
-- `data/cv.md` is parsed by a test, so it must stay valid — including
-  `data/photo.jpg`, which it references.
+- The `projects_dir` / `projects_path` / `projects_cv` fixtures in
+  [tests/conftest.py](tests/conftest.py) — a generated project list, a `cv.md` and
+  a `config.json` tying them together. `projects_path` is the *recipe*, which is
+  what the CLI is handed. The `cv.md` there keeps a `## Projekte` section no entry
+  asks for, as the negative control: anything under it that reaches the output
+  means a span was copied that nobody requested.
+- Nothing in `tests/data/` has a recipe, which is what keeps the single-`.md` path
+  covered. Add one there and those tests start needing a `.docx`.
+- `data/cv.md` and `data/config.json` are both exercised by a test, so they must
+  stay valid — including `data/photo.jpg` and the `.docx` the recipe globs for.
 
 PDF assertions use `pypdf` to check real page geometry and extracted text rather
 than only that a file appeared.

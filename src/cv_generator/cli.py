@@ -2,14 +2,20 @@
 
 Commands::
 
-    document-generator build data/cv.md              # every format -> dist/cv.{html,docx,pdf}
-    document-generator build data/cv.md -f html      # -> dist/cv.html
-    document-generator build data/cv.md -f pdf       # -> dist/cv.pdf   (headless Chromium)
-    document-generator build data/cv.md -f docx      # -> dist/cv.docx  (MS Word)
-    document-generator build data/cv.md -f html -f pdf
-    document-generator validate data/cv.md
+    document-generator build                         # every format -> dist/cv.{html,docx,pdf}
+    document-generator build -f html                 # -> dist/cv.html
+    document-generator build -f pdf                  # -> dist/cv.pdf   (headless Chromium)
+    document-generator build -f docx                 # -> dist/cv.docx  (MS Word)
+    document-generator build -f html -f pdf
+    document-generator build other/config.json       # a different recipe
+    document-generator build notes/talk.md           # a single Markdown file, no recipe
+    document-generator validate
     document-generator engines
     document-generator themes
+
+The source is a ``config.json`` -- which names the Markdown file the header comes
+from and the span each section is copied out of -- or a single ``.md``, which is
+its own header and sections. The suffix decides, so both fit one argument.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from pathlib import Path
 
 from cv_generator import __version__
 from cv_generator.errors import CVError
-from cv_generator.parser import parse_cv_file
+from cv_generator.parser import load_cv
 from cv_generator.pdf import (
     BROWSER_WS_ENV,
     DEFAULT_ENGINE,
@@ -34,7 +40,7 @@ from cv_generator.pdf import (
 from cv_generator.render import Renderer
 from cv_generator.word import WordRenderer
 
-DEFAULT_SOURCE = Path("data/cv.md")
+DEFAULT_SOURCE = Path("data/config.json")
 DEFAULT_OUTPUT_DIR = Path("dist")
 # Order matters: this is the order a format-less `build` renders in, and pdf comes
 # last because it is the only one that can fail on a machine that is otherwise
@@ -56,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         type=Path,
         default=DEFAULT_SOURCE,
-        help=f"CV Markdown file (default: {DEFAULT_SOURCE})",
+        help=f"build recipe (.json) or a single CV Markdown file (default: {DEFAULT_SOURCE})",
     )
     build.add_argument(
         "-f",
@@ -131,7 +137,9 @@ def resolve_formats(requested: list[str] | None, out: Path | None) -> tuple[str,
 
 def cmd_build(args: argparse.Namespace) -> int:
     formats = resolve_formats(args.format, args.out)
-    cv = parse_cv_file(args.source)
+    # `name` rather than the source's stem: a recipe is called config.json and
+    # says what its result is called, so dist/config.html would be nobody's CV.
+    cv, name = load_cv(args.source)
 
     # Rendered at most once and shared by the html and pdf outputs -- the pdf is
     # printed from exactly the document written next to it, not a second render.
@@ -139,7 +147,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     failed = False
 
     for fmt in formats:
-        output: Path = args.out or DEFAULT_OUTPUT_DIR / f"{args.source.stem}.{fmt}"
+        output: Path = args.out or DEFAULT_OUTPUT_DIR / f"{name}.{fmt}"
         try:
             if fmt == "docx":
                 WordRenderer().render(cv, output)
@@ -165,17 +173,19 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    cv = parse_cv_file(args.source)
-    print(f"{args.source}: ok - {cv.name}, {len(cv.sections)} section(s)")
+    cv, name = load_cv(args.source)
+    print(f"{args.source}: ok - {cv.name}, {len(cv.sections)} section(s) -> {name}.*")
     if cv.photo is not None:
         # The one referenced file, so worth confirming it was found and read.
         print(f"  photo: {cv.photo.media_type}, {len(cv.photo.data) / 1024:.0f} kB")
     for section in cv.sections:
         line = f"  - {section.title} ({section.slug})"
-        if section.imported_from:
-            # Which file the projects came from is the thing worth checking, so
-            # `validate` is where you check it before a build goes out.
-            line += f" <- {len(section.blocks)} block(s) from {section.imported_from}"
+        # Which file fed which section is the thing worth checking before a build
+        # goes out: a recipe resolves globs and headlines, and neither is visible
+        # in the result. So `validate` is where you check them.
+        if section.source:
+            found = f"{len(section.blocks)} block(s) from " if section.blocks else ""
+            line += f" <- {found}{section.source}"
         print(line)
     return 0
 

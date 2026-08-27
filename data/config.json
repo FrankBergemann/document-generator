@@ -1,0 +1,18 @@
+{
+  "sections": [
+    {
+      "source": "cv.md",
+      "end": "Kenntnisse"
+    },
+    {
+      "source": "*Projektliste*.docx",
+      "begin": "Projekthistorie",
+      "end": "Ausbildung",
+      "title": "Projekte"
+    },
+    {
+      "source": "cv.md",
+      "begin": "Kenntnisse"
+    }
+  ]
+}
