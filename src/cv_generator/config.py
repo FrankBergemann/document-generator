@@ -8,10 +8,10 @@ written down::
 
     {
       "sections": [
-        {"source": "cv.md",                                        "end": "Kenntnisse"},
+        {"source": "document.md",                                        "end": "Kenntnisse"},
         {"source": "*Projektliste*.docx", "begin": "Projekthistorie", "end": "Ausbildung",
          "title": "Projekte"},
-        {"source": "cv.md",              "begin": "Kenntnisse"}
+        {"source": "document.md",              "begin": "Kenntnisse"}
       ]
     }
 
@@ -93,7 +93,7 @@ class BuildConfig(BaseModel):
     sections: list[SectionSpec] = Field(min_length=1)
     # The stem of the files a build writes (dist/<output>.html, ...). Defaults to
     # that of the file the header came from, which is what keeps a recipe built
-    # around `cv.md` producing `dist/cv.*` with nothing said about it.
+    # around `document.md` producing `dist/document.*` with nothing said about it.
     output: str | None = None
 
 

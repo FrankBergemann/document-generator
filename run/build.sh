@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Render the CV. Everything after the script name goes to `document-generator build`.
+# Render the document. Everything after the script name goes to `document-generator build`.
 #
-#   run/build.sh                               # data/config.json -> dist/cv.{html,docx,pdf}
-#   run/build.sh -f html                       # -> dist/cv.html
-#   run/build.sh -f pdf                        # -> dist/cv.pdf   (needs a browser)
-#   run/build.sh -f docx                       # -> dist/cv.docx
+#   run/build.sh                               # data/config.json -> dist/document.{html,docx,pdf}
+#   run/build.sh -f html                       # -> dist/document.html
+#   run/build.sh -f pdf                        # -> dist/document.pdf   (needs a browser)
+#   run/build.sh -f docx                       # -> dist/document.docx
 #   run/build.sh -f html -f docx               # a subset; -f is repeatable
 #   run/build.sh other/config.json             # a different recipe
 #   run/build.sh notes/talk.md -o out.pdf -f pdf   # a single .md, no recipe

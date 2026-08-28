@@ -1,4 +1,4 @@
-"""Validated data model for a CV.
+"""Validated data model for a document.
 
 The model deliberately keeps section *content* as raw Markdown rather than
 modelling every possible CV structure (jobs, dates, bullet lists, ...) and

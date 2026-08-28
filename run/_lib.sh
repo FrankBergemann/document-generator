@@ -10,7 +10,7 @@ set -euo pipefail
 
 # Resolved from this file's location rather than $PWD, so a script behaves the
 # same whether it is invoked as `run/build.sh`, `./build.sh` or by absolute path.
-# The `cd` is what makes the CLI's own defaults (data/cv.md, dist/) mean the same
+# The `cd` is what makes the CLI's own defaults (data/document.md, dist/) mean the same
 # thing from any directory; the price is that a relative path *argument* is also
 # read relative to the project root, which is the documented rule.
 RUN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

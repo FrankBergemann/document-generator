@@ -26,7 +26,7 @@ run/lint.sh                     # ruff check
 run/format.sh                   # ruff format ('--check' to only report)
 run/typecheck.sh                # mypy, strict, covers src/ and tests/
 run/check.sh                    # all four, in CI's order
-run/build.sh                    # data/config.json -> dist/cv.{html,docx,pdf}
+run/build.sh                    # data/config.json -> dist/document.{html,docx,pdf}
 run/build.sh -f html            # one format; -f is repeatable
 run/build.sh -f pdf             # needs chromium, see below
 run/build.sh -f docx
@@ -139,7 +139,7 @@ in Acrobat or Word on the host. Windows locks it, the mount reports EACCES, and
 ```
 config.json ─── config.py ──┐            ┌─ render.py ─> HTML ─┬─> .html
   which span, which file    │            │                     └─ pdf/chrome.py ─> .pdf
-cv.md ──────────────────────┼ parser.py ─┤        (pydantic)
+document.md ──────────────────────┼ parser.py ─┤        (pydantic)
                             │  CV model  └─ word.py ──────────────────────────────> .docx
 *Projektliste*.docx ────────┘
   "Projekthistorie"  docx_import.py
@@ -154,11 +154,11 @@ backends see one finished model and never learn how many files went into it.
 `load_cv(path)` is the single entry point both `build` and `validate` use: it
 dispatches on the suffix (`.json` → recipe, else a lone `.md`) and returns the CV
 together with the stem its outputs take. That stem is the recipe's `output`, *not*
-the recipe file's name — `dist/config.html` would be nobody's CV.
+the recipe file's name — `dist/config.html` would be nobody's document.
 
 ## Conventions that matter here
 
-- **Sections stay as Markdown in the model.** `CV.sections` is an ordered list of
+- **Sections stay as Markdown in the model.** `document.sections` is an ordered list of
   `Section(title, slug, markdown)`. Two things this rules out: per-section models
   for jobs/dates/skills (layout within a section belongs to the Markdown file and
   the theme), and pre-rendering to HTML (which would force `.docx` to parse HTML
@@ -184,7 +184,7 @@ the recipe file's name — `dist/config.html` would be nobody's CV.
   template.** `render.py` wraps the stylesheet and the Markdown-derived HTML, so a
   theme author cannot accidentally escape CSS (`>` → `&gt;` breaks child
   selectors) or double-escape rendered Markdown. Autoescape stays on for
-  everything from `cv.md`.
+  everything from `document.md`.
 - **A `.docx`-sourced section is the only exception to the rule above.** It
   carries `blocks` instead of Markdown; see *Imported Word sections* below.
 - **Composition lives in the recipe, never in the code.** Which section comes
@@ -237,7 +237,7 @@ assembly. A `sections` entry copies one span of one file:
   exactly when someone is most likely to rebuild.
 - **The `output` name comes from the recipe, not from the recipe file.** Every
   project's recipe is called `config.json`; `dist/config.html` would be nobody's
-  CV. `load_cv` returns the CV and that name together for this reason.
+  document. `load_cv` returns the CV and that name together for this reason.
 - **Slugs are deduplicated across the whole document** (`_Slugger`), not per
   file. Two sources easily use the same heading, and slugs are the HTML anchors.
 
@@ -269,7 +269,7 @@ Three things that look arbitrary and are not:
   cell they are the layout.
 
 Font family, page setup and paragraph spacing are *not* imported: they stay the
-CV's own, or the projects would drag a second document's design into the CV. In
+CV's own, or the projects would drag a second document's design into the document. In
 `.docx` output the tables get Word's `Table Grid` and the source's column
 proportions scaled to this page (`WordTheme.content_width_mm`); in HTML they get
 `.cv-block-table` and `<col style="width:…%">`.
@@ -281,7 +281,7 @@ and after the imported one). A committed `.docx` would be an opaque blob.
 
 ## Word output specifics
 
-`word.py` mirrors `templates/classic/cv.css` as a `WordTheme` dataclass, because
+`word.py` mirrors `templates/classic/document.css` as a `WordTheme` dataclass, because
 Word has no stylesheet. Content is applied through **named paragraph styles** so
 the recipient can restyle from Word's style pane — do not hard-code run
 formatting where a style would do.
@@ -314,14 +314,14 @@ the `requires_chromium` marker, live in [tests/support.py](tests/support.py).
   Deliberately separate: `minimal.md` and `rich.md` stay photo-free so the
   photoless header keeps its coverage.
 - The `projects_dir` / `projects_path` / `projects_cv` fixtures in
-  [tests/conftest.py](tests/conftest.py) — a generated project list, a `cv.md` and
+  [tests/conftest.py](tests/conftest.py) — a generated project list, a `document.md` and
   a `config.json` tying them together. `projects_path` is the *recipe*, which is
-  what the CLI is handed. The `cv.md` there keeps a `## Projekte` section no entry
+  what the CLI is handed. The `document.md` there keeps a `## Projekte` section no entry
   asks for, as the negative control: anything under it that reaches the output
   means a span was copied that nobody requested.
 - Nothing in `tests/data/` has a recipe, which is what keeps the single-`.md` path
   covered. Add one there and those tests start needing a `.docx`.
-- `data/cv.md` and `data/config.json` are both exercised by a test, so they must
+- `data/document.md` and `data/config.json` are both exercised by a test, so they must
   stay valid — including `data/photo.jpg` and the `.docx` the recipe globs for.
 
 PDF assertions use `pypdf` to check real page geometry and extracted text rather

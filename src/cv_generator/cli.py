@@ -2,10 +2,10 @@
 
 Commands::
 
-    document-generator build                         # every format -> dist/cv.{html,docx,pdf}
-    document-generator build -f html                 # -> dist/cv.html
-    document-generator build -f pdf                  # -> dist/cv.pdf   (headless Chromium)
-    document-generator build -f docx                 # -> dist/cv.docx  (MS Word)
+    document-generator build                         # every format -> dist/document.{html,docx,pdf}
+    document-generator build -f html                 # -> dist/document.html
+    document-generator build -f pdf                  # -> dist/document.pdf   (headless Chromium)
+    document-generator build -f docx                 # -> dist/document.docx  (MS Word)
     document-generator build -f html -f pdf
     document-generator build other/config.json       # a different recipe
     document-generator build notes/talk.md           # a single Markdown file, no recipe
@@ -138,7 +138,7 @@ def resolve_formats(requested: list[str] | None, out: Path | None) -> tuple[str,
 def cmd_build(args: argparse.Namespace) -> int:
     formats = resolve_formats(args.format, args.out)
     # `name` rather than the source's stem: a recipe is called config.json and
-    # says what its result is called, so dist/config.html would be nobody's CV.
+    # says what its result is called, so dist/config.html would be nobody's document.
     cv, name = load_cv(args.source)
 
     # Rendered at most once and shared by the html and pdf outputs -- the pdf is

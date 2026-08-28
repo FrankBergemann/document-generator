@@ -20,13 +20,13 @@ class TestBuildHTML:
     def test_writes_html(
         self, tmp_path: Path, minimal_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        out = tmp_path / "cv.html"
+        out = tmp_path / "document.html"
         assert main(["build", str(minimal_path), "-o", str(out)]) == 0
         assert "Ada Lovelace" in out.read_text(encoding="utf-8")
         assert str(out) in capsys.readouterr().out
 
     def test_creates_missing_output_directory(self, tmp_path: Path, minimal_path: Path) -> None:
-        out = tmp_path / "nested" / "deeper" / "cv.html"
+        out = tmp_path / "nested" / "deeper" / "document.html"
         assert main(["build", str(minimal_path), "-o", str(out)]) == 0
         assert out.is_file()
 
@@ -40,7 +40,9 @@ class TestBuildHTML:
     def test_unknown_theme_is_a_clean_error(
         self, tmp_path: Path, minimal_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        code = main(["build", str(minimal_path), "-t", "nope", "-o", str(tmp_path / "cv.html")])
+        code = main(
+            ["build", str(minimal_path), "-t", "nope", "-o", str(tmp_path / "document.html")]
+        )
         assert code == 1
         assert "not found" in capsys.readouterr().err
 
@@ -90,14 +92,14 @@ class TestBuildEveryFormat:
     def test_out_takes_the_format_from_its_extension(
         self, tmp_path: Path, minimal_path: Path
     ) -> None:
-        out = tmp_path / "cv.docx"
+        out = tmp_path / "document.docx"
         assert main(["build", str(minimal_path), "-o", str(out)]) == 0
         assert "Ada Lovelace" in [p.text for p in docx.Document(str(out)).paragraphs]
 
     def test_out_with_an_unknown_extension_is_a_clean_error(
         self, tmp_path: Path, minimal_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        assert main(["build", str(minimal_path), "-o", str(tmp_path / "cv.rtf")]) == 1
+        assert main(["build", str(minimal_path), "-o", str(tmp_path / "document.rtf")]) == 1
         assert "cannot tell the format" in capsys.readouterr().err
 
     def test_a_failing_format_does_not_cost_the_others(
@@ -120,7 +122,7 @@ class TestBuildEveryFormat:
     def test_out_takes_a_single_format(
         self, tmp_path: Path, minimal_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        out = tmp_path / "cv.html"
+        out = tmp_path / "document.html"
         assert main(["build", str(minimal_path), "-f", "html", "-o", str(out)]) == 0
         assert main(["build", str(minimal_path), "-f", "html", "-f", "docx", "-o", str(out)]) == 1
         assert "takes a single --format" in capsys.readouterr().err
@@ -138,7 +140,7 @@ class TestBuildFromARecipe:
         # Without this every project would ship a dist/config.html.
         monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
         assert main(["build", str(projects_path), "-f", "html"]) == 0
-        assert (Path("dist") / "cv.html").is_file()
+        assert (Path("dist") / "document.html").is_file()
 
     def test_output_overrides_that_name(
         self,
@@ -152,7 +154,7 @@ class TestBuildFromARecipe:
         assert (Path("dist") / "lebenslauf.html").is_file()
 
     def test_every_source_reaches_the_output(self, tmp_path: Path, projects_path: Path) -> None:
-        out = tmp_path / "cv.html"
+        out = tmp_path / "document.html"
         assert main(["build", str(projects_path), "-o", str(out)]) == 0
         html = out.read_text(encoding="utf-8")
         assert "Land Schleswig-Holstein" in html  # from the .docx
@@ -167,12 +169,12 @@ class TestBuildFromARecipe:
 
 class TestBuildWithPhoto:
     def test_html_embeds_the_photo(self, tmp_path: Path, photo_path: Path) -> None:
-        out = tmp_path / "cv.html"
+        out = tmp_path / "document.html"
         assert main(["build", str(photo_path), "-o", str(out)]) == 0
         assert 'src="data:image/png;base64,' in out.read_text(encoding="utf-8")
 
     def test_docx_embeds_the_photo(self, tmp_path: Path, photo_path: Path) -> None:
-        out = tmp_path / "cv.docx"
+        out = tmp_path / "document.docx"
         assert main(["build", str(photo_path), "-f", "docx", "-o", str(out)]) == 0
         assert len(docx.Document(str(out)).inline_shapes) == 1
 
@@ -181,7 +183,7 @@ class TestBuildDOCX:
     def test_writes_a_readable_docx(
         self, tmp_path: Path, minimal_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        out = tmp_path / "cv.docx"
+        out = tmp_path / "document.docx"
         assert main(["build", str(minimal_path), "-f", "docx", "-o", str(out)]) == 0
         assert "Ada Lovelace" in [p.text for p in docx.Document(str(out)).paragraphs]
         assert str(out) in capsys.readouterr().out
@@ -217,7 +219,7 @@ class TestBuildDOCX:
 class TestBuildPDF:
     @requires_chromium
     def test_writes_a_pdf(self, tmp_path: Path, minimal_path: Path) -> None:
-        out = tmp_path / "cv.pdf"
+        out = tmp_path / "document.pdf"
         assert main(["build", str(minimal_path), "-f", "pdf", "-o", str(out)]) == 0
         assert out.read_bytes().startswith(b"%PDF-")
 
@@ -230,7 +232,7 @@ class TestBuildPDF:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv(BROWSER_WS_ENV, raising=False)
-        out = tmp_path / "cv.pdf"
+        out = tmp_path / "document.pdf"
         assert main(["build", str(minimal_path), "-f", "pdf", "-o", str(out)]) == 1
         assert "playwright install chromium" in capsys.readouterr().err
         assert not out.exists()
@@ -239,7 +241,16 @@ class TestBuildPDF:
         self, tmp_path: Path, minimal_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         code = main(
-            ["build", str(minimal_path), "-f", "pdf", "-e", "nope", "-o", str(tmp_path / "cv.pdf")]
+            [
+                "build",
+                str(minimal_path),
+                "-f",
+                "pdf",
+                "-e",
+                "nope",
+                "-o",
+                str(tmp_path / "document.pdf"),
+            ]
         )
         assert code == 1
         assert "unknown PDF engine" in capsys.readouterr().err
@@ -269,7 +280,7 @@ class TestValidate:
     def test_unreadable_photo_is_a_clean_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        source = tmp_path / "cv.md"
+        source = tmp_path / "document.md"
         source.write_text("---\nname: Ada\nphoto: gone.png\n---\n", encoding="utf-8")
         assert main(["validate", str(source)]) == 1
         assert "cannot read photo" in capsys.readouterr().err
@@ -286,24 +297,24 @@ class TestValidate:
         assert PROJEKTLISTE_NAME in out
         assert "block(s) from" in out
         assert "Kenntnisse (kenntnisse) <- " in out
-        assert "cv.md" in out
+        assert "document.md" in out
 
     def test_reports_the_name_the_outputs_will_take(
         self, projects_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The recipe is called config.json and the result is not.
         assert main(["validate", str(projects_path)]) == 0
-        assert "-> cv.*" in capsys.readouterr().out
+        assert "-> document.*" in capsys.readouterr().out
 
     def test_a_broken_recipe_is_a_clean_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        (tmp_path / "cv.md").write_text(PROJECTS_MD, encoding="utf-8")
+        (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
         source = write_config(
             tmp_path,
             {
                 "sections": [
-                    {"source": "cv.md", "end": "Berufserfahrung"},
+                    {"source": "document.md", "end": "Berufserfahrung"},
                     {"source": "*Projektliste*.docx", "begin": "Projekthistorie"},
                 ]
             },

@@ -34,6 +34,6 @@ fi
 
 echo
 echo "installed. Next:"
-echo "  run/validate.sh      # parse data/cv.md"
-echo "  run/build.sh         # -> dist/cv.html"
+echo "  run/validate.sh      # parse data/document.md"
+echo "  run/build.sh         # -> dist/document.html"
 echo "  run/engines.sh       # is a PDF browser reachable?"

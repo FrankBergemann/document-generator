@@ -205,7 +205,7 @@ class TestRemoteBrowser:
         html = Renderer().render_html(minimal_cv)
         engine = ChromeEngine(ws_endpoint=endpoint, timeout_ms=5_000)
         with pytest.raises(PdfEngineError) as excinfo:
-            engine.render(html, tmp_path / "cv.pdf")
+            engine.render(html, tmp_path / "document.pdf")
         message = str(excinfo.value)
         assert endpoint in message
         assert "docker compose up -d playwright" in message
@@ -219,7 +219,7 @@ class TestMissingBrowser:
         monkeypatch.delenv(BROWSER_WS_ENV, raising=False)
         html = Renderer().render_html(minimal_cv)
         with pytest.raises(PdfEngineError) as excinfo:
-            ChromeEngine().render(html, tmp_path / "cv.pdf")
+            ChromeEngine().render(html, tmp_path / "document.pdf")
         message = str(excinfo.value)
         assert "playwright install chromium" in message
         assert "--format docx" in message
@@ -230,7 +230,7 @@ class TestChromePrinting:
     @pytest.fixture
     def pdf(self, tmp_path: Path, minimal_cv: CV) -> Path:
         html = Renderer().render_html(minimal_cv)
-        output = tmp_path / "out" / "cv.pdf"
+        output = tmp_path / "out" / "document.pdf"
         ChromeEngine().render(html, output)
         return output
 
@@ -281,7 +281,7 @@ class TestChromePrinting:
                 "-f",
                 "pdf",
                 "-o",
-                str(tmp_path / "cv.pdf"),
+                str(tmp_path / "document.pdf"),
             ],
             capture_output=True,
             text=True,

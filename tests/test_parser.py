@@ -130,8 +130,8 @@ class TestParseCV:
             parse_cv("---\nname: [unclosed\n---\n")
 
     def test_error_message_names_the_source(self) -> None:
-        with pytest.raises(CVParseError, match=r"cv\.md"):
-            parse_cv("---\nheadline: no name\n---\n", source="cv.md")
+        with pytest.raises(CVParseError, match=r"document\.md"):
+            parse_cv("---\nheadline: no name\n---\n", source="document.md")
 
 
 class TestPhoto:
@@ -190,9 +190,9 @@ class TestPhoto:
         assert parse_cv("---\nname: Ada\nphoto:\n---\n").photo is None
 
     def test_error_names_the_source_file(self, tmp_path: Path) -> None:
-        source = tmp_path / "cv.md"
+        source = tmp_path / "document.md"
         source.write_text("---\nname: Ada\nphoto: gone.png\n---\n", encoding="utf-8")
-        with pytest.raises(CVParseError, match=r"cv\.md"):
+        with pytest.raises(CVParseError, match=r"document\.md"):
             parse_cv_file(source)
 
 
@@ -200,7 +200,7 @@ class TestSingleFileHasNoImports:
     """A lone `.md` is the whole document; only a recipe reaches other files."""
 
     def test_every_section_is_markdown(self, tmp_path: Path) -> None:
-        path = tmp_path / "cv.md"
+        path = tmp_path / "document.md"
         path.write_text(PROJECTS_MD, encoding="utf-8")
         cv = parse_cv_file(path)
         assert [s.title for s in cv.sections] == ["Berufserfahrung", "Projekte", "Kenntnisse"]
@@ -211,7 +211,7 @@ class TestSingleFileHasNoImports:
         # name alone. Composition is a recipe's job now, so the heading is just a
         # heading -- and a directory holding such a document changes nothing.
         write_projektliste(tmp_path / PROJEKTLISTE_NAME)
-        path = tmp_path / "cv.md"
+        path = tmp_path / "document.md"
         path.write_text(PROJECTS_MD, encoding="utf-8")
         projects = parse_cv_file(path).section("projekte")
         assert projects is not None

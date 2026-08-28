@@ -29,7 +29,7 @@ accepts still works — `run/build.sh input/other.md -f pdf -o out/other.pdf`. T
 shared bits live in `run/_lib.sh`, which is sourced rather than executed.
 
 A script works from any directory: it finds the project root itself and runs
-there, so `data/cv.md`, `dist/` and every other relative path mean the same thing
+there, so `data/document.md`, `dist/` and every other relative path mean the same thing
 wherever you invoke it from — including path arguments, which are read relative to
 the project root rather than your shell's directory. Absolute paths are absolute.
 
@@ -118,10 +118,10 @@ as a permission error.
 ## Usage
 
 ```bash
-run/build.sh                     # data/config.json -> dist/cv.html, .docx, .pdf
-run/build.sh -f html             # -> dist/cv.html
-run/build.sh -f pdf              # -> dist/cv.pdf
-run/build.sh -f docx             # -> dist/cv.docx
+run/build.sh                     # data/config.json -> dist/document.html, .docx, .pdf
+run/build.sh -f html             # -> dist/document.html
+run/build.sh -f pdf              # -> dist/document.pdf
+run/build.sh -f docx             # -> dist/document.docx
 run/build.sh -f html -f docx     # a subset; -f is repeatable
 run/build.sh -o out.pdf
 run/build.sh -t classic          # theme (HTML/PDF only)
@@ -208,10 +208,10 @@ written down, and it is the whole of it:
 ```json
 {
   "sections": [
-    { "source": "cv.md",                                          "end": "Kenntnisse" },
+    { "source": "document.md",                                          "end": "Kenntnisse" },
     { "source": "*Projektliste*.docx", "begin": "Projekthistorie", "end": "Ausbildung",
       "title": "Projekte" },
-    { "source": "cv.md",               "begin": "Kenntnisse" }
+    { "source": "document.md",               "begin": "Kenntnisse" }
   ]
 }
 ```
@@ -219,7 +219,7 @@ written down, and it is the whole of it:
 ```
 data/
   config.json            the recipe above
-  cv.md                  header + Berufserfahrung, Kenntnisse, Ausbildung, Sprachen
+  document.md                  header + Berufserfahrung, Kenntnisse, Ausbildung, Sprachen
   Projektliste.docx      "Projekthistorie", one table per project
   photo.jpg
 ```
@@ -233,8 +233,8 @@ Kenntnisse, Ausbildung, Sprachen. Edit either file, rebuild, and the CV follows.
 | `source` | A file in the recipe's own directory. May be a glob — `*Projektliste*.docx` survives the list being reissued with a new date in its name — and then has to match exactly one file. |
 | `begin` | The headline the span starts at. Matched case-insensitively, with or without its `##`. **Leave it out** and the span starts at the top of the file. |
 | `end` | The headline it stops **before** — that headline belongs to whatever comes next and is not copied. **Leave it out** and the span runs to the end of the file. An `end` that never turns up is an error, not "run to the end": the recipe said where to stop. |
-| `title` | Renames the span's first section. `Projekthistorie` in Word, `Projekte` in the CV. |
-| `output` | The stem the results take: `dist/cv.html`, `dist/cv.docx`, `dist/cv.pdf`. Defaults to that of the file the header came from — `cv.md`, hence `dist/cv.*`. |
+| `title` | Renames the span's first section. `Projekthistorie` in Word, `Projekte` in the document. |
+| `output` | The stem the results take: `dist/document.html`, `dist/document.docx`, `dist/document.pdf`. Defaults to that of the file the header came from — `document.md`, hence `dist/document.*`. |
 
 ### Where the header comes from
 
@@ -247,13 +247,13 @@ which supplies the header *and* Berufserfahrung.
 To take a file's header and none of its sections, end at its first heading:
 
 ```json
-{ "source": "cv.md", "end": "Berufserfahrung" }
+{ "source": "document.md", "end": "Berufserfahrung" }
 ```
 
 A later entry that also starts at the top contributes only its sections: the CV
 has one name and one summary, and the first entry to supply them is the one that
 does. If no entry starts at the top of a Markdown file, the build fails saying so
-— a CV with no name is not a CV.
+— a CV with no name is not a document.
 
 ### Spans
 
@@ -285,13 +285,13 @@ check before a build goes out — a recipe resolves globs and headlines, and
 neither is visible in the result:
 
 ```
-data/config.json: ok - Frank Bergemann, 5 section(s) -> cv.*
+data/config.json: ok - Frank Bergemann, 5 section(s) -> document.*
   photo: image/jpeg, 680 kB
-  - Berufserfahrung (berufserfahrung) <- data/cv.md
+  - Berufserfahrung (berufserfahrung) <- data/document.md
   - Projekte (projekte) <- 25 block(s) from data/Bergemann-Projektliste_19_08_2026.docx
-  - Kenntnisse (kenntnisse) <- data/cv.md
-  - Ausbildung (ausbildung) <- data/cv.md
-  - Sprachen (sprachen) <- data/cv.md
+  - Kenntnisse (kenntnisse) <- data/document.md
+  - Ausbildung (ausbildung) <- data/document.md
+  - Sprachen (sprachen) <- data/document.md
 ```
 
 All three output formats show the same imported content: HTML and PDF render the
@@ -303,7 +303,7 @@ Word's own bullet styles.
 ```
 data/config.json ─── config.py ──┐            ┌─ render.py ─> HTML ─┬─> .html
   which span, which file         │            │                     └─ pdf/chrome.py ─> .pdf
-data/cv.md ──────────────────────┼ parser.py ─┤        (pydantic)
+data/document.md ──────────────────────┼ parser.py ─┤        (pydantic)
   frontmatter + Markdown         │  CV model  └─ word.py ──────────────────────────────> .docx
 *Projektliste*.docx ─────────────┘
   "Projekthistorie"   docx_import.py
@@ -318,7 +318,7 @@ data/cv.md ──────────────────────┼
 - [src/cv_generator/word.py](src/cv_generator/word.py) — model → `.docx` (see `WordTheme`)
 - [src/cv_generator/ooxml.py](src/cv_generator/ooxml.py) — the OOXML bits python-docx has no API for
 - [src/cv_generator/pdf/](src/cv_generator/pdf/) — the `PdfEngine` protocol and the Chromium engine
-- [src/cv_generator/templates/](src/cv_generator/templates/) — HTML themes (`cv.html.j2` + `cv.css`)
+- [src/cv_generator/templates/](src/cv_generator/templates/) — HTML themes (`document.html.j2` + `document.css`)
 
 **The photo is read by the parser, not by the backends.** `photo:` is the one
 key naming another file, resolved relative to the `.md` so a CV and its portrait
@@ -387,7 +387,7 @@ extension:
 - A4 page setup, `keep-with-next` on headings so no entry title is orphaned at a
   page break, and the document language tagged for spell-check.
 
-Word has no stylesheet, so the visual choices of `templates/classic/cv.css` are
+Word has no stylesheet, so the visual choices of `templates/classic/document.css` are
 mirrored in `WordTheme` ([word.py](src/cv_generator/word.py)). Themes given with
 `-t` apply to HTML and PDF only; to restyle `.docx`, pass a `WordTheme`:
 
@@ -406,7 +406,7 @@ in a section body falls back to its alt text).
 ## Adding a theme
 
 Copy `src/cv_generator/templates/classic/` to a new directory next to it. A theme
-is exactly two files, `cv.html.j2` and `cv.css`. Keep both branches of the
+is exactly two files, `document.html.j2` and `document.css`. Keep both branches of the
 section loop — `section.blocks | blocks` as well as `section.markdown | markdown`
 — or an imported section renders as an empty heading. Then:
 

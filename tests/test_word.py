@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import struct
 import zlib
+from itertools import pairwise
 from pathlib import Path
 
 import docx
@@ -41,7 +42,7 @@ from cv_generator.word import (
 from tests.support import BODY_SIZE_PT, SAMPLE_PROJECTS
 
 
-def write(cv: CV, tmp_path: Path, name: str = "cv.docx") -> Path:
+def write(cv: CV, tmp_path: Path, name: str = "document.docx") -> Path:
     output = tmp_path / name
     WordRenderer().render(cv, output)
     return output
@@ -112,14 +113,14 @@ class TestFileOutput:
         assert read(output).paragraphs
 
     def test_creates_missing_directories(self, minimal_cv: CV, tmp_path: Path) -> None:
-        output = tmp_path / "nested" / "deeper" / "cv.docx"
+        output = tmp_path / "nested" / "deeper" / "document.docx"
         WordRenderer().render(minimal_cv, output)
         assert output.is_file()
 
     def test_unwritable_target_raises_cv_error(self, minimal_cv: CV, tmp_path: Path) -> None:
         # A directory where a file should go: the OSError must surface as a
         # CVError so the CLI reports it on one line instead of a traceback.
-        blocked = tmp_path / "cv.docx"
+        blocked = tmp_path / "document.docx"
         blocked.mkdir()
         with pytest.raises(RenderError, match="cannot write"):
             WordRenderer().render(minimal_cv, blocked)
@@ -459,6 +460,18 @@ class TestImportedBlocks:
 
     def test_each_project_is_a_table(self, projects_doc: WordDocument) -> None:
         assert len(projects_doc.tables) == len(SAMPLE_PROJECTS)
+
+    def test_adjacent_tables_are_separated_by_a_paragraph(self, projects_doc: WordDocument) -> None:
+        # Word merges two `w:tbl` siblings with nothing between them into one
+        # table -- the blank paragraph the source used to keep them apart is
+        # dropped on import, so it has to be reinstated here, not carried over.
+        body = projects_doc.element.body
+        tables = [child for child in body if child.tag == qn("w:tbl")]
+        assert len(tables) >= 2
+        for earlier, later in pairwise(tables):
+            between = list(earlier.itersiblings(preceding=False))
+            assert later in between
+            assert any(sibling.tag == qn("w:p") for sibling in between[: between.index(later)])
 
     def test_cell_content_survives_paragraph_by_paragraph(self, projects_doc: WordDocument) -> None:
         period = projects_doc.tables[0].rows[0].cells[0]

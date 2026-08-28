@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="{{ cv.lang }}">
+<html lang="{{ document.lang }}">
 <head>
 <meta charset="utf-8">
-<title>{{ cv.name }}{% if cv.headline %} - {{ cv.headline }}{% endif %}</title>
+<title>{{ document.name }}{% if document.headline %} - {{ document.headline }}{% endif %}</title>
 <style>
 {{ stylesheet }}
 </style>
@@ -12,41 +12,41 @@
 
   <header class="cv-header">
     <div class="cv-identity">
-      <h1 class="cv-name">{{ cv.name }}</h1>
-      {% if cv.headline %}
-      <p class="cv-headline">{{ cv.headline }}</p>
+      <h1 class="cv-name">{{ document.name }}</h1>
+      {% if document.headline %}
+      <p class="cv-headline">{{ document.headline }}</p>
       {% endif %}
-      {% if not cv.contact.is_empty() %}
+      {% if not document.contact.is_empty() %}
       <ul class="cv-contact">
-        {% if cv.contact.email %}
-        <li><a href="mailto:{{ cv.contact.email }}">{{ cv.contact.email }}</a></li>
+        {% if document.contact.email %}
+        <li><a href="mailto:{{ document.contact.email }}">{{ document.contact.email }}</a></li>
         {% endif %}
-        {% if cv.contact.phone %}
-        <li>{{ cv.contact.phone }}</li>
+        {% if document.contact.phone %}
+        <li>{{ document.contact.phone }}</li>
         {% endif %}
-        {% if cv.contact.location %}
-        <li>{{ cv.contact.location }}</li>
+        {% if document.contact.location %}
+        <li>{{ document.contact.location }}</li>
         {% endif %}
-        {% for link in cv.contact.links %}
+        {% for link in document.contact.links %}
         <li><a href="{{ link.url }}">{{ link.label }}</a></li>
         {% endfor %}
       </ul>
       {% endif %}
     </div>
-    {% if cv.photo %}
+    {% if document.photo %}
     {# Embedded as a data URL, never as a file reference: the PDF browser may be
        in another container and cannot read this filesystem. #}
-    <img class="cv-photo" src="{{ cv.photo.data_uri() }}" alt="{{ cv.name }}">
+    <img class="cv-photo" src="{{ document.photo.data_uri() }}" alt="{{ document.name }}">
     {% endif %}
   </header>
 
-  {% if cv.summary %}
+  {% if document.summary %}
   <section class="cv-summary">
-    {{ cv.summary | markdown }}
+    {{ document.summary | markdown }}
   </section>
   {% endif %}
 
-  {% for section in cv.sections %}
+  {% for section in document.sections %}
   {# A section is either Markdown from the .md or blocks imported from a .docx;
      the extra class lets an imported section page-break between its blocks. #}
   <section class="cv-section{% if section.blocks %} cv-section--blocks{% endif %}" id="{{ section.slug }}">

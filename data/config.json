@@ -1,7 +1,7 @@
 {
   "sections": [
     {
-      "source": "cv.md",
+      "source": "document.md",
       "end": "Kenntnisse"
     },
     {
@@ -11,7 +11,7 @@
       "title": "Projekte"
     },
     {
-      "source": "cv.md",
+      "source": "document.md",
       "begin": "Kenntnisse"
     }
   ]

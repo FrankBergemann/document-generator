@@ -143,7 +143,7 @@ class TestImportedBlocks:
             tmp_path / PROJEKTLISTE_NAME,
             [Project(period="2026", role="<script>alert(1)</script>", customer="a & b")],
         )
-        (tmp_path / "cv.md").write_text(PROJECTS_MD, encoding="utf-8")
+        (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
         html = renderer.render_html(load_cv(write_config(tmp_path, PROJECTS_CONFIG)).cv)
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html

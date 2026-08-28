@@ -23,14 +23,14 @@ from cv_generator.models import CV, RichBlock, RichParagraph, RichRun, RichTable
 
 BUILTIN_TEMPLATES_DIR = Path(__file__).parent / "templates"
 
-TEMPLATE_NAME = "cv.html.j2"
-STYLESHEET_NAME = "cv.css"
+TEMPLATE_NAME = "document.html.j2"
+STYLESHEET_NAME = "document.css"
 
 
 class Renderer:
     """Turns a CV into HTML using a theme directory.
 
-    A theme is a directory containing ``cv.html.j2`` and ``cv.css``. The
+    A theme is a directory containing ``document.html.j2`` and ``document.css``. The
     stylesheet is inlined into the output so that a single HTML file is enough
     for any downstream PDF engine.
 
@@ -73,7 +73,7 @@ class Renderer:
                 f"theme {name!r} not found in {self.templates_dir} (available: {known})"
             ) from exc
 
-        return template.render(cv=cv, stylesheet=self._stylesheet(name))
+        return template.render(document=cv, stylesheet=self._stylesheet(name))
 
     def _stylesheet(self, theme: str) -> Markup:
         path = self.templates_dir / theme / STYLESHEET_NAME

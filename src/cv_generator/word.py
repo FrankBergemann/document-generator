@@ -1,6 +1,6 @@
 """MS Word (.docx) output.
 
-Word has no stylesheet, so the visual decisions that ``templates/classic/cv.css``
+Word has no stylesheet, so the visual decisions that ``templates/classic/document.css``
 expresses in CSS are mirrored here as a :class:`WordTheme` and applied as named
 paragraph styles -- which also means the recipient can restyle the whole
 document from Word's style pane instead of reformatting paragraph by paragraph.
@@ -107,7 +107,7 @@ class WordTheme:
     page_margin_vertical_mm: float = 16.0
     page_margin_horizontal_mm: float = 15.0
 
-    # Mirrors `--photo-width` / `--photo-max-height` in cv.css: the photo sets
+    # Mirrors `--photo-width` / `--photo-max-height` in document.css: the photo sets
     # the header's height rather than being squeezed into it.
     photo_width_mm: float = 34.0
     # Only a guard: clears a 3:4 portrait (45.3mm at this width) untouched.
@@ -117,7 +117,7 @@ class WordTheme:
     # Cell insets for a table imported from another document, in points. The
     # source's own value is not carried over: Word leaves most of these unset
     # and lets its default template decide, so reproducing it means reproducing
-    # that template. Mirrors `.cv-block-table td { padding }` in cv.css.
+    # that template. Mirrors `.cv-block-table td { padding }` in document.css.
     imported_cell_padding_vertical_pt: float = 2.8
     imported_cell_padding_horizontal_pt: float = 4.0
 
@@ -440,12 +440,22 @@ class WordRenderer:
         ``target`` is where the paragraphs go -- the document, or a table cell --
         while ``document`` stays the document, because a cell has no style
         collection of its own to look list styles up in.
+
+        The blank paragraph the source kept between two tables is dropped on
+        import (see :mod:`cv_generator.docx_import`), but Word still needs
+        *something* between two adjacent ``w:tbl`` elements or it renders them
+        as one merged table -- so a table that directly follows another one
+        here gets an empty paragraph reinserted ahead of it.
         """
+        previous_was_table = False
         for block in blocks:
             if isinstance(block, RichTable):
+                if previous_was_table:
+                    target.add_paragraph()
                 self._add_imported_table(document, block)
             else:
                 self._add_imported_paragraph(document, target, block)
+            previous_was_table = isinstance(block, RichTable)
 
     def _add_imported_paragraph(
         self, document: WordDocument, target: _Blocks, block: RichParagraph

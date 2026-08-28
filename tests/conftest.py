@@ -40,14 +40,14 @@ Dieser Text steht in der Markdown-Datei und darf nicht im Ergebnis landen.
 # with it, then Word, then Markdown again.
 PROJECTS_CONFIG: dict[str, Any] = {
     "sections": [
-        {"source": "cv.md", "end": "Projekte"},
+        {"source": "document.md", "end": "Projekte"},
         {
             "source": PROJEKTLISTE_NAME,
             "begin": "Projekthistorie",
             "end": "Ausbildung",
             "title": "Projekte",
         },
-        {"source": "cv.md", "begin": "Kenntnisse"},
+        {"source": "document.md", "begin": "Kenntnisse"},
     ],
 }
 
@@ -97,7 +97,7 @@ def portrait_path() -> Path:
 
 @pytest.fixture
 def sample_cv_path() -> Path:
-    return REPO_ROOT / "data" / "cv.md"
+    return REPO_ROOT / "data" / "document.md"
 
 
 @pytest.fixture
@@ -109,7 +109,7 @@ def sample_config_path() -> Path:
 def projects_dir(tmp_path: Path) -> Path:
     """A directory holding a Markdown CV, a Word project list and a recipe."""
     write_projektliste(tmp_path / PROJEKTLISTE_NAME)
-    (tmp_path / "cv.md").write_text(PROJECTS_MD, encoding="utf-8")
+    (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
     write_config(tmp_path, PROJECTS_CONFIG)
     return tmp_path
 
