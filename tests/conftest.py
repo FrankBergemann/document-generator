@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from cv_generator.models import CV
-from cv_generator.parser import load_cv, parse_cv_file
+from cv_generator.models import Document
+from cv_generator.parser import load_doc, parse_doc_file
 from tests.support import DATA_DIR, PROJEKTLISTE_NAME, REPO_ROOT, write_projektliste
 
 # The Markdown half of an assembled document. Its `## Projekte` section is the
@@ -66,8 +66,8 @@ def minimal_path() -> Path:
 
 
 @pytest.fixture
-def minimal_cv(minimal_path: Path) -> CV:
-    return parse_cv_file(minimal_path)
+def minimal_document(minimal_path: Path) -> Document:
+    return parse_doc_file(minimal_path)
 
 
 @pytest.fixture
@@ -76,8 +76,8 @@ def rich_path() -> Path:
 
 
 @pytest.fixture
-def rich_cv(rich_path: Path) -> CV:
-    return parse_cv_file(rich_path)
+def rich_document(rich_path: Path) -> Document:
+    return parse_doc_file(rich_path)
 
 
 @pytest.fixture
@@ -86,8 +86,8 @@ def photo_path() -> Path:
 
 
 @pytest.fixture
-def photo_cv(photo_path: Path) -> CV:
-    return parse_cv_file(photo_path)
+def photo_document(photo_path: Path) -> Document:
+    return parse_doc_file(photo_path)
 
 
 @pytest.fixture
@@ -97,7 +97,7 @@ def portrait_path() -> Path:
 
 
 @pytest.fixture
-def sample_cv_path() -> Path:
+def sample_doc_path() -> Path:
     return REPO_ROOT / "data" / "document.md"
 
 
@@ -108,7 +108,7 @@ def sample_config_path() -> Path:
 
 @pytest.fixture
 def projects_dir(tmp_path: Path) -> Path:
-    """A directory holding a Markdown CV, a Word project list and a recipe."""
+    """A directory holding a Markdown Document, a Word project list and a recipe."""
     write_projektliste(tmp_path / PROJEKTLISTE_NAME)
     (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
     write_config(tmp_path, PROJECTS_CONFIG)
@@ -122,5 +122,5 @@ def projects_path(projects_dir: Path) -> Path:
 
 
 @pytest.fixture
-def projects_cv(projects_path: Path) -> CV:
-    return load_cv(projects_path).cv
+def projects_document(projects_path: Path) -> Document:
+    return load_doc(projects_path).doc

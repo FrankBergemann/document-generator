@@ -1,4 +1,4 @@
-"""Read one rectangular range out of an existing ``.xlsx`` and into the CV model.
+"""Read one rectangular range out of an existing ``.xlsx`` and into the Document model.
 
 Some content lives in a spreadsheet and nowhere else -- an invoice's line items,
 kept as a workbook because that is what accounting actually sends around.
@@ -16,7 +16,7 @@ What "keeping the formatting" means here:
 
 * **Carried over** -- bold, italic, underline, strikethrough, font size, whether
   any cell in the range is ruled, and the sheet's own column widths.
-* **Left to the CV's theme** -- font family and everything about page layout, the
+* **Left to the Document's theme** -- font family and everything about page layout, the
   same split the ``.docx`` import makes and for the same reason: the imported
   range has to sit in a document rendered by this project's themes, not carry a
   second document's design into it.
@@ -35,7 +35,7 @@ What "keeping the formatting" means here:
 * **Number formatting is approximated, not interpreted.** Excel's format-code
   language is a small program in itself -- locales, conditional sections, dozens
   of tokens -- and this module does not implement it. It recognises just enough
-  for a CV-adjacent spreadsheet: a date or datetime becomes ``DD.MM.YYYY``, a
+  for a Document-adjacent spreadsheet: a date or datetime becomes ``DD.MM.YYYY``, a
   format naming a currency symbol becomes a two-decimal, thousands-grouped
   amount with that symbol, and anything else falls back to a plain rendering of
   the value.
@@ -60,13 +60,13 @@ from openpyxl.utils.exceptions import InvalidFileException
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from cv_generator.errors import CVParseError
+from cv_generator.errors import DocParseError
 from cv_generator.models import RichBlock, RichCell, RichParagraph, RichRun, RichTable
 
 # A number format naming one of these is read as currency: the value is rounded
 # to two decimals, grouped by thousands the German way (this project's own
 # sample documents are all German), and the symbol is appended. Not every
-# currency Excel knows -- just the ones plausible in a CV-adjacent spreadsheet.
+# currency Excel knows -- just the ones plausible in a Document-adjacent spreadsheet.
 _CURRENCY_SYMBOLS = ("€", "$", "£")
 
 
@@ -87,19 +87,19 @@ def load_section(
         since a cell rectangle has no headings to split it at.
 
     Raises:
-        CVParseError: if the file cannot be read as a workbook, has no active
+        DocParseError: if the file cannot be read as a workbook, has no active
             sheet, or the rectangle is empty or runs backwards.
     """
     workbook = _open(path)
     sheet = workbook.active
     if sheet is None:
-        raise CVParseError(f"{path}: the workbook has no active sheet")
+        raise DocParseError(f"{path}: the workbook has no active sheet")
 
     first_col, last_col = _column_range(path, col_start, col_end)
     if row_start < 1:
-        raise CVParseError(f"{path}: 'row-start' must be at least 1, got {row_start}")
+        raise DocParseError(f"{path}: 'row-start' must be at least 1, got {row_start}")
     if row_start > row_end:
-        raise CVParseError(f"{path}: 'row-start' {row_start} comes after 'row-end' {row_end}")
+        raise DocParseError(f"{path}: 'row-start' {row_start} comes after 'row-end' {row_end}")
 
     grid = list(
         sheet.iter_rows(min_row=row_start, max_row=row_end, min_col=first_col, max_col=last_col)
@@ -122,7 +122,7 @@ def _open(path: Path) -> Workbook:
         # this project renders a value, not a spreadsheet engine.
         return load_workbook(str(path), data_only=True)
     except (InvalidFileException, zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
-        raise CVParseError(f"cannot read {path} as an Excel workbook: {exc}") from exc
+        raise DocParseError(f"cannot read {path} as an Excel workbook: {exc}") from exc
 
 
 def _column_range(path: Path, col_start: str, col_end: str) -> tuple[int, int]:
@@ -130,9 +130,9 @@ def _column_range(path: Path, col_start: str, col_end: str) -> tuple[int, int]:
         first = column_index_from_string(col_start.strip().upper())
         last = column_index_from_string(col_end.strip().upper())
     except ValueError as exc:
-        raise CVParseError(f"{path}: not a column letter: {exc}") from exc
+        raise DocParseError(f"{path}: not a column letter: {exc}") from exc
     if first > last:
-        raise CVParseError(f"{path}: 'col-start' {col_start!r} comes after 'col-end' {col_end!r}")
+        raise DocParseError(f"{path}: 'col-start' {col_start!r} comes after 'col-end' {col_end!r}")
     return first, last
 
 

@@ -1,0 +1,20 @@
+{
+  "sections": [
+    {
+      "source": "document.md",
+      "format": "md",
+      "end": "Kenntnisse"
+    },
+    {
+      "source": "Projektliste.docx",
+      "format": "docx",
+      "begin": "Projekthistorie"
+    },
+    {
+      "source": "document.md",
+      "format": "md",
+      "begin": "Kenntnisse"
+    }
+  ],
+  "target": "dist/cv"
+}

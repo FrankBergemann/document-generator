@@ -154,6 +154,43 @@ class TestBuildFromARecipe:
         assert main(["build", str(source), "-f", "html"]) == 0
         assert (Path("dist") / "lebenslauf.html").is_file()
 
+    def test_target_places_the_result_outside_dist(
+        self,
+        projects_dir: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        source = write_config(projects_dir, PROJECTS_CONFIG | {"target": "exports/lebenslauf"})
+        cwd = tmp_path_factory.mktemp("cwd")
+        monkeypatch.chdir(cwd)
+        assert main(["build", str(source), "-f", "html"]) == 0
+        assert (cwd / "exports" / "lebenslauf.html").is_file()
+        assert not (cwd / "dist").exists()
+
+    def test_target_is_relative_to_the_project_root_not_the_recipe(
+        self,
+        projects_dir: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        source = write_config(projects_dir, PROJECTS_CONFIG | {"target": "exports/lebenslauf"})
+        cwd = tmp_path_factory.mktemp("cwd")
+        monkeypatch.chdir(cwd)
+        assert main(["build", str(source), "-f", "html"]) == 0
+        assert not (projects_dir / "exports").exists()
+
+    def test_out_still_wins_over_target(
+        self, tmp_path: Path, projects_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source = write_config(projects_dir, PROJECTS_CONFIG | {"target": "exports/lebenslauf"})
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        out = tmp_path / "explicit.html"
+        assert main(["build", str(source), "-o", str(out)]) == 0
+        assert out.is_file()
+        assert not (cwd / "exports").exists()
+
     def test_every_source_reaches_the_output(self, tmp_path: Path, projects_path: Path) -> None:
         out = tmp_path / "document.html"
         assert main(["build", str(projects_path), "-o", str(out)]) == 0
@@ -298,7 +335,7 @@ class TestValidate:
     def test_reports_the_photo_it_found(
         self, photo_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # The one file the CV points at, so "was it found and read?" is worth
+        # The one file the Document points at, so "was it found and read?" is worth
         # answering before a build.
         assert main(["validate", str(photo_path)]) == 0
         assert "photo: image/png" in capsys.readouterr().out
@@ -337,6 +374,19 @@ class TestValidate:
         # The recipe is called config.json and the result is not.
         assert main(["validate", str(projects_path)]) == 0
         assert "-> document.*" in capsys.readouterr().out
+
+    def test_reports_the_target_path_when_the_recipe_names_one(
+        self,
+        projects_dir: Path,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        source = write_config(projects_dir, PROJECTS_CONFIG | {"target": "exports/lebenslauf"})
+        cwd = tmp_path_factory.mktemp("cwd")
+        monkeypatch.chdir(cwd)
+        assert main(["validate", str(source)]) == 0
+        assert f"-> {cwd / 'exports' / 'lebenslauf'}.*" in capsys.readouterr().out
 
     def test_a_broken_recipe_is_a_clean_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

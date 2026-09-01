@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from cv_generator.models import CV, Contact, Link, Photo, Section
+from cv_generator.models import Contact, Document, Link, Photo, Section
 
 
 class TestPhoto:
@@ -35,34 +35,53 @@ class TestContact:
         assert not Contact(**kwargs).is_empty()  # type: ignore[arg-type]
 
 
-class TestCV:
-    def test_name_is_required(self) -> None:
-        with pytest.raises(ValidationError):
-            CV()  # type: ignore[call-arg]
+class TestDocument:
+    def test_name_defaults_to_none(self) -> None:
+        # A recipe with no Markdown source has no frontmatter to take a name
+        # from, and no identity is still a valid document.
+        assert Document().name is None
 
     def test_defaults(self) -> None:
-        cv = CV(name="Ada")
-        assert cv.lang == "de"
-        assert cv.theme == "classic"
-        assert cv.headline is None
-        assert cv.photo is None
-        assert cv.summary is None
-        assert cv.sections == []
-        assert cv.contact.is_empty()
+        doc = Document(name="Ada")
+        assert doc.lang == "de"
+        assert doc.theme == "classic"
+        assert doc.headline is None
+        assert doc.photo is None
+        assert doc.summary is None
+        assert doc.sections == []
+        assert doc.contact.is_empty()
 
     def test_unknown_field_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            CV(name="Ada", nickname="typo")  # type: ignore[call-arg]
+            Document(name="Ada", nickname="typo")  # type: ignore[call-arg]
+
+    def test_has_identity_is_false_when_completely_bare(self) -> None:
+        assert Document().has_identity() is False
+
+    def test_has_identity_is_true_with_a_name(self) -> None:
+        assert Document(name="Ada").has_identity() is True
+
+    def test_has_identity_is_true_with_only_a_headline(self) -> None:
+        assert Document(headline="Mathematician").has_identity() is True
+
+    def test_has_identity_is_true_with_only_contact_details(self) -> None:
+        assert Document(contact=Contact(email="ada@example.com")).has_identity() is True
+
+    def test_has_identity_is_true_with_only_a_photo(self) -> None:
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        assert Document(photo=photo).has_identity() is True
 
     def test_section_lookup_by_slug(self) -> None:
-        cv = CV(name="Ada", sections=[Section(title="Skills", slug="skills", markdown="- x")])
-        found = cv.section("skills")
+        doc = Document(
+            name="Ada", sections=[Section(title="Skills", slug="skills", markdown="- x")]
+        )
+        found = doc.section("skills")
         assert found is not None and found.title == "Skills"
 
     def test_section_lookup_misses_return_none(self) -> None:
-        assert CV(name="Ada").section("skills") is None
+        assert Document(name="Ada").section("skills") is None
 
     def test_default_containers_are_not_shared(self) -> None:
-        first, second = CV(name="A"), CV(name="B")
+        first, second = Document(name="A"), Document(name="B")
         first.contact.links.append(Link(label="X", url="https://x.test"))
         assert second.contact.links == []

@@ -27,8 +27,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from cv_generator import __version__
-from cv_generator.errors import CVError
-from cv_generator.parser import load_cv
+from cv_generator.errors import DocError
+from cv_generator.parser import load_doc
 from cv_generator.pdf import (
     BROWSER_WS_ENV,
     DEFAULT_ENGINE,
@@ -52,18 +52,18 @@ FORMATS = ("html", "docx", "pdf")
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="document-generator",
-        description="Generate a CV from a single Markdown file.",
+        description="Generate a Document from a single Markdown file.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    build = subcommands.add_parser("build", help="render a CV")
+    build = subcommands.add_parser("build", help="render a Document")
     build.add_argument(
         "source",
         nargs="?",
         type=Path,
         default=None,
-        help=f"build recipe (.json) or a single CV Markdown file (default: {DEFAULT_SOURCE})",
+        help=f"build recipe (.json) or a single Document Markdown file (default: {DEFAULT_SOURCE})",
     )
     build.add_argument(
         "--config",
@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build.set_defaults(handler=cmd_build)
 
-    validate = subcommands.add_parser("validate", help="parse a CV without writing output")
+    validate = subcommands.add_parser("validate", help="parse a Document without writing output")
     validate.add_argument("source", nargs="?", type=Path, default=DEFAULT_SOURCE)
     validate.set_defaults(handler=cmd_validate)
 
@@ -119,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve_formats(requested: list[str] | None, out: Path | None) -> tuple[str, ...]:
     """Which formats a `build` renders, from `--format` and `--out`.
 
-    No `--format` means all of them: the same CV is normally sent as `.pdf` and
+    No `--format` means all of them: the same Document is normally sent as `.pdf` and
     kept as `.docx`, so producing the set is the common run and picking one the
     exception. `--out` names a single file, so it pins the run to one format --
     its own extension, which is the one place the wanted format is then written
@@ -129,13 +129,13 @@ def resolve_formats(requested: list[str] | None, out: Path | None) -> tuple[str,
         formats = tuple(dict.fromkeys(requested))
         if out is not None and len(formats) > 1:
             joined = ", ".join(formats)
-            raise CVError(f"-o/--out names one file, so it takes a single --format (got {joined})")
+            raise DocError(f"-o/--out names one file, so it takes a single --format (got {joined})")
         return formats
     if out is None:
         return FORMATS
     fmt = out.suffix.lstrip(".").lower()
     if fmt not in FORMATS:
-        raise CVError(
+        raise DocError(
             f"cannot tell the format of '{out}': give it one of "
             f"{', '.join('.' + f for f in FORMATS)}, or pass --format"
         )
@@ -150,7 +150,7 @@ def resolve_input(source: Path | None, config: Path | None) -> Path:
     bare path -- so giving both is a contradiction, not a preference to break.
     """
     if source is not None and config is not None:
-        raise CVError("pass either a source argument or --config, not both")
+        raise DocError("pass either a source argument or --config, not both")
     return config if config is not None else (source if source is not None else DEFAULT_SOURCE)
 
 
@@ -159,7 +159,8 @@ def cmd_build(args: argparse.Namespace) -> int:
     source = resolve_input(args.source, args.config)
     # `name` rather than the source's stem: a recipe is called config.json and
     # says what its result is called, so dist/config.html would be nobody's document.
-    cv, name = load_cv(source)
+    # `target`, when the recipe names one, picks the directory too -- see `load_doc`.
+    doc, name, target = load_doc(source)
 
     # Rendered at most once and shared by the html and pdf outputs -- the pdf is
     # printed from exactly the document written next to it, not a second render.
@@ -167,19 +168,22 @@ def cmd_build(args: argparse.Namespace) -> int:
     failed = False
 
     for fmt in formats:
-        output: Path = args.out or DEFAULT_OUTPUT_DIR / f"{name}.{fmt}"
+        default = (
+            Path(f"{target}.{fmt}") if target is not None else DEFAULT_OUTPUT_DIR / f"{name}.{fmt}"
+        )
+        output: Path = args.out or default
         try:
             if fmt == "docx":
-                WordRenderer().render(cv, output)
+                WordRenderer().render(doc, output)
             else:
                 if html is None:
-                    html = Renderer(args.templates_dir).render_html(cv, args.theme)
+                    html = Renderer(args.templates_dir).render_html(doc, args.theme)
                 if fmt == "html":
                     output.parent.mkdir(parents=True, exist_ok=True)
                     output.write_text(html, encoding="utf-8")
                 else:
                     get_engine(args.engine).render(html, output)
-        except CVError as exc:
+        except DocError as exc:
             # One format failing must not cost the others: a missing browser is
             # the usual reason and the .html and .docx beside it are still worth
             # having. The exit code still reports that something went wrong, and
@@ -193,13 +197,16 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    cv, name = load_cv(args.source)
-    print(f"{args.source}: ok - {cv.name}, {len(cv.sections)} section(s) -> {name}.*")
-    if cv.photo is not None:
+    doc, name, target = load_doc(args.source)
+    destination = target if target is not None else Path(name)
+    identity = doc.name or "(no name)"
+    print(f"{args.source}: ok - {identity}, {len(doc.sections)} section(s) -> {destination}.*")
+    if doc.photo is not None:
         # The one referenced file, so worth confirming it was found and read.
-        print(f"  photo: {cv.photo.media_type}, {len(cv.photo.data) / 1024:.0f} kB")
-    for section in cv.sections:
-        line = f"  - {section.title} ({section.slug})"
+        print(f"  photo: {doc.photo.media_type}, {len(doc.photo.data) / 1024:.0f} kB")
+    for section in doc.sections:
+        title = section.title or "(untitled)"
+        line = f"  - {title} ({section.slug})"
         # Which file fed which section is the thing worth checking before a build
         # goes out: a recipe resolves globs and headlines, and neither is visible
         # in the result. So `validate` is where you check them.
@@ -207,6 +214,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
             found = f"{len(section.blocks)} block(s) from " if section.blocks else ""
             line += f" <- {found}{section.source}"
         print(line)
+    if doc.page_header:
+        print(f"  page header: {len(doc.page_header)} block(s)")
+    if doc.page_footer:
+        print(f"  page footer: {len(doc.page_footer)} block(s)")
     return 0
 
 
@@ -245,7 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         exit_code: int = args.handler(args)
-    except CVError as exc:
+    except DocError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return exit_code

@@ -24,8 +24,8 @@ from docx.table import Table
 
 from cv_generator.errors import RenderError
 from cv_generator.models import (
-    CV,
     Contact,
+    Document,
     Link,
     Photo,
     RichCell,
@@ -35,7 +35,7 @@ from cv_generator.models import (
     Section,
 )
 from cv_generator.ooxml import HYPERLINK_RELATIONSHIP
-from cv_generator.parser import parse_cv
+from cv_generator.parser import parse_doc
 from cv_generator.word import (
     STYLE_BODY,
     STYLE_CODE,
@@ -53,9 +53,9 @@ from cv_generator.word import (
 from tests.support import BODY_SIZE_PT, SAMPLE_PROJECTS
 
 
-def write(cv: CV, tmp_path: Path, name: str = "document.docx") -> Path:
+def write(doc: Document, tmp_path: Path, name: str = "document.docx") -> Path:
     output = tmp_path / name
-    WordRenderer().render(cv, output)
+    WordRenderer().render(doc, output)
     return output
 
 
@@ -97,18 +97,18 @@ def styles_in_order(document: WordDocument) -> list[str]:
 
 
 @pytest.fixture
-def minimal_doc(minimal_cv: CV, tmp_path: Path) -> WordDocument:
-    return read(write(minimal_cv, tmp_path))
+def minimal_doc(minimal_document: Document, tmp_path: Path) -> WordDocument:
+    return read(write(minimal_document, tmp_path))
 
 
 @pytest.fixture
-def rich_doc(rich_cv: CV, tmp_path: Path) -> WordDocument:
-    return read(write(rich_cv, tmp_path))
+def rich_doc(rich_document: Document, tmp_path: Path) -> WordDocument:
+    return read(write(rich_document, tmp_path))
 
 
 @pytest.fixture
-def photo_doc(photo_cv: CV, tmp_path: Path) -> WordDocument:
-    return read(write(photo_cv, tmp_path, "photo.docx"))
+def photo_doc(photo_document: Document, tmp_path: Path) -> WordDocument:
+    return read(write(photo_document, tmp_path, "photo.docx"))
 
 
 def header_table(document: WordDocument) -> Table:
@@ -116,25 +116,27 @@ def header_table(document: WordDocument) -> Table:
 
 
 class TestFileOutput:
-    def test_writes_a_readable_docx(self, minimal_cv: CV, tmp_path: Path) -> None:
-        output = write(minimal_cv, tmp_path)
+    def test_writes_a_readable_docx(self, minimal_document: Document, tmp_path: Path) -> None:
+        output = write(minimal_document, tmp_path)
         assert output.is_file()
         # A .docx is a zip; a corrupt one fails here rather than in Word.
         assert output.read_bytes().startswith(b"PK")
         assert read(output).paragraphs
 
-    def test_creates_missing_directories(self, minimal_cv: CV, tmp_path: Path) -> None:
+    def test_creates_missing_directories(self, minimal_document: Document, tmp_path: Path) -> None:
         output = tmp_path / "nested" / "deeper" / "document.docx"
-        WordRenderer().render(minimal_cv, output)
+        WordRenderer().render(minimal_document, output)
         assert output.is_file()
 
-    def test_unwritable_target_raises_cv_error(self, minimal_cv: CV, tmp_path: Path) -> None:
+    def test_unwritable_target_raises_doc_error(
+        self, minimal_document: Document, tmp_path: Path
+    ) -> None:
         # A directory where a file should go: the OSError must surface as a
-        # CVError so the CLI reports it on one line instead of a traceback.
+        # DocError so the CLI reports it on one line instead of a traceback.
         blocked = tmp_path / "document.docx"
         blocked.mkdir()
         with pytest.raises(RenderError, match="cannot write"):
-            WordRenderer().render(minimal_cv, blocked)
+            WordRenderer().render(minimal_document, blocked)
 
 
 class TestPageSetup:
@@ -175,7 +177,7 @@ class TestHeader:
         assert texts(minimal_doc, STYLE_HEADLINE) == ["Mathematician"]
 
     def test_headline_omitted_when_absent(self, tmp_path: Path) -> None:
-        document = read(write(CV(name="Ada"), tmp_path))
+        document = read(write(Document(name="Ada"), tmp_path))
         assert texts(document, STYLE_HEADLINE) == []
 
     def test_contact_details_are_present(self, rich_doc: WordDocument) -> None:
@@ -183,8 +185,10 @@ class TestHeader:
         for fragment in ("ada@example.com", "+44 1815 121815", "London", "Notes"):
             assert fragment in xml
 
-    def test_email_and_links_become_hyperlinks(self, rich_cv: CV, tmp_path: Path) -> None:
-        document = read(write(rich_cv, tmp_path))
+    def test_email_and_links_become_hyperlinks(
+        self, rich_document: Document, tmp_path: Path
+    ) -> None:
+        document = read(write(rich_document, tmp_path))
         targets = {
             rel.target_ref
             for rel in document.part.rels.values()
@@ -315,33 +319,33 @@ class TestHeaderPhoto:
 
     def test_a_tall_photo_is_bounded_without_being_squashed(self, tmp_path: Path) -> None:
         # Mirrors `max-height` in the stylesheet: a 1:10 image scaled to 34mm
-        # wide would be 340mm tall and push the whole CV off page one.
+        # wide would be 340mm tall and push the whole Document off page one.
         theme = WordTheme()
-        cv = CV(name="Ada", photo=Photo(data=png(100, 1000), media_type="image/png"))
-        shape = read(write(cv, tmp_path, "tall.docx")).inline_shapes[0]
+        doc = Document(name="Ada", photo=Photo(data=png(100, 1000), media_type="image/png"))
+        shape = read(write(doc, tmp_path, "tall.docx")).inline_shapes[0]
         assert shape.height.mm == pytest.approx(theme.photo_max_height_mm, abs=0.05)
         assert shape.height / shape.width == pytest.approx(10.0, rel=1e-3)
 
-    def test_photo_survives_a_second_render(self, photo_cv: CV, tmp_path: Path) -> None:
+    def test_photo_survives_a_second_render(self, photo_document: Document, tmp_path: Path) -> None:
         # The image stream is consumed on use; a reused renderer must not hand
         # an exhausted one to the second document.
         renderer = WordRenderer()
-        renderer.render(photo_cv, tmp_path / "one.docx")
-        renderer.render(photo_cv, tmp_path / "two.docx")
+        renderer.render(photo_document, tmp_path / "one.docx")
+        renderer.render(photo_document, tmp_path / "two.docx")
         assert len(read(tmp_path / "two.docx").inline_shapes) == 1
 
-    def test_theme_can_resize_the_photo(self, photo_cv: CV, tmp_path: Path) -> None:
+    def test_theme_can_resize_the_photo(self, photo_document: Document, tmp_path: Path) -> None:
         output = tmp_path / "narrow.docx"
-        WordRenderer(WordTheme(photo_width_mm=25.0)).render(photo_cv, output)
+        WordRenderer(WordTheme(photo_width_mm=25.0)).render(photo_document, output)
         assert read(output).inline_shapes[0].width.mm == pytest.approx(25.0, abs=0.05)
 
     def test_widening_the_photo_still_respects_the_height_bound(
-        self, photo_cv: CV, tmp_path: Path
+        self, photo_document: Document, tmp_path: Path
     ) -> None:
         # 50mm wide would make the 3:4 fixture 66.7mm tall, so the bound wins and
         # takes the width back down with it rather than distorting the picture.
         output = tmp_path / "wide.docx"
-        WordRenderer(WordTheme(photo_width_mm=50.0)).render(photo_cv, output)
+        WordRenderer(WordTheme(photo_width_mm=50.0)).render(photo_document, output)
         shape = read(output).inline_shapes[0]
         assert shape.height.mm == pytest.approx(WordTheme().photo_max_height_mm, abs=0.05)
         assert shape.width.mm == pytest.approx(36.0, abs=0.05)
@@ -359,8 +363,98 @@ class TestSections:
         assert order.index(STYLE_SUMMARY) < order.index(STYLE_SECTION)
 
     def test_summary_omitted_when_absent(self, tmp_path: Path) -> None:
-        cv = parse_cv("---\nname: Ada\n---\n\n## Skills\n\n- Python\n")
-        assert texts(read(write(cv, tmp_path)), STYLE_SUMMARY) == []
+        doc = parse_doc("---\nname: Ada\n---\n\n## Skills\n\n- Python\n")
+        assert texts(read(write(doc, tmp_path)), STYLE_SUMMARY) == []
+
+    def test_an_untitled_section_gets_no_heading_paragraph(self, tmp_path: Path) -> None:
+        doc = Document(sections=[Section(title=None, slug="letterhead", markdown="Body text.")])
+        document = read(write(doc, tmp_path))
+        assert texts(document, STYLE_SECTION) == []
+        assert "Body text." in texts(document, STYLE_BODY)
+
+    def test_a_titled_section_still_gets_its_heading(self, tmp_path: Path) -> None:
+        doc = Document(
+            sections=[Section(title="Kenntnisse", slug="kenntnisse", markdown="- Python")]
+        )
+        document = read(write(doc, tmp_path))
+        assert texts(document, STYLE_SECTION) == ["Kenntnisse"]
+
+
+class TestPageHeader:
+    def test_page_header_content_is_written(self, tmp_path: Path) -> None:
+        doc = Document(page_header=[RichParagraph(runs=[RichRun(text="Header text")])])
+        document = read(write(doc, tmp_path))
+        assert [p.text for p in document.sections[-1].header.paragraphs] == ["Header text"]
+
+    def test_no_stray_blank_paragraph_ahead_of_the_header_content(self, tmp_path: Path) -> None:
+        # A freshly defined header part starts with one blank paragraph of its
+        # own; it must not survive alongside the real content.
+        doc = Document(page_header=[RichParagraph(runs=[RichRun(text="Header text")])])
+        document = read(write(doc, tmp_path))
+        assert len(document.sections[-1].header.paragraphs) == 1
+
+    def test_no_header_definition_without_page_header_content(self, tmp_path: Path) -> None:
+        doc = Document(name="Ada")
+        document = read(write(doc, tmp_path))
+        assert document.sections[-1].header.is_linked_to_previous is True
+
+    def test_page_header_formatting_is_preserved(self, tmp_path: Path) -> None:
+        doc = Document(page_header=[RichParagraph(runs=[RichRun(text="Bold header", bold=True)])])
+        document = read(write(doc, tmp_path))
+        run = document.sections[-1].header.paragraphs[0].runs[0]
+        assert run.bold is True
+
+
+class TestPageFooter:
+    def test_page_footer_content_is_written(self, tmp_path: Path) -> None:
+        doc = Document(page_footer=[RichParagraph(runs=[RichRun(text="Footer text")])])
+        document = read(write(doc, tmp_path))
+        assert [p.text for p in document.sections[-1].footer.paragraphs] == ["Footer text"]
+
+    def test_no_stray_blank_paragraph_ahead_of_the_footer_content(self, tmp_path: Path) -> None:
+        # A freshly defined footer part starts with one blank paragraph of its
+        # own; it must not survive alongside the real content.
+        doc = Document(page_footer=[RichParagraph(runs=[RichRun(text="Footer text")])])
+        document = read(write(doc, tmp_path))
+        assert len(document.sections[-1].footer.paragraphs) == 1
+
+    def test_no_footer_definition_without_page_footer_content(self, tmp_path: Path) -> None:
+        doc = Document(name="Ada")
+        document = read(write(doc, tmp_path))
+        assert document.sections[-1].footer.is_linked_to_previous is True
+
+    def test_page_footer_formatting_is_preserved(self, tmp_path: Path) -> None:
+        doc = Document(page_footer=[RichParagraph(runs=[RichRun(text="Bold footer", bold=True)])])
+        document = read(write(doc, tmp_path))
+        run = document.sections[-1].footer.paragraphs[0].runs[0]
+        assert run.bold is True
+
+
+class TestEmptyHeader:
+    """A recipe with nothing to put in the header gets no header at all --
+    not an empty one with a rule drawn under nothing."""
+
+    def test_no_header_paragraphs_when_completely_bare(self, tmp_path: Path) -> None:
+        doc = Document(sections=[Section(title="Kenntnisse", slug="kenntnisse", markdown="x")])
+        document = read(write(doc, tmp_path))
+        assert texts(document, STYLE_NAME) == []
+        assert texts(document, STYLE_CONTACT) == []
+
+    def test_a_photo_alone_still_gets_a_header(self, tmp_path: Path) -> None:
+        doc = Document(photo=Photo(data=png(40, 40), media_type="image/png"))
+        document = read(write(doc, tmp_path))
+        # The photo goes in a layout table alongside the (empty) identity text.
+        assert len(document.tables) == 1
+
+    def test_a_name_alone_still_gets_a_header(self, tmp_path: Path) -> None:
+        doc = Document(name="Ada")
+        document = read(write(doc, tmp_path))
+        assert texts(document, STYLE_NAME) == ["Ada"]
+
+    def test_contact_details_alone_still_get_a_header(self, tmp_path: Path) -> None:
+        doc = Document(contact=Contact(email="ada@example.com"))
+        document = read(write(doc, tmp_path))
+        assert texts(document, STYLE_CONTACT) != []
 
 
 class TestEntries:
@@ -371,8 +465,8 @@ class TestEntries:
         assert texts(minimal_doc, STYLE_META) == ["1842 – 1843"]
 
     def test_a_normal_paragraph_is_not_meta(self, tmp_path: Path) -> None:
-        cv = parse_cv("---\nname: Ada\n---\n## S\n\n*Just italic text.*\n")
-        document = read(write(cv, tmp_path))
+        doc = parse_doc("---\nname: Ada\n---\n## S\n\n*Just italic text.*\n")
+        document = read(write(doc, tmp_path))
         assert texts(document, STYLE_META) == []
         assert "Just italic text." in texts(document, STYLE_BODY)
 
@@ -441,8 +535,8 @@ class TestInlineFormatting:
     def test_inline_code_uses_the_mono_font(self, summary_runs: dict[str, object]) -> None:
         assert summary_runs["code"].font.name == WordTheme().mono_font  # type: ignore[attr-defined]
 
-    def test_inline_link_is_a_real_hyperlink(self, rich_cv: CV, tmp_path: Path) -> None:
-        document = read(write(rich_cv, tmp_path))
+    def test_inline_link_is_a_real_hyperlink(self, rich_document: Document, tmp_path: Path) -> None:
+        document = read(write(rich_document, tmp_path))
         targets = {
             rel.target_ref
             for rel in document.part.rels.values()
@@ -466,8 +560,8 @@ class TestImportedBlocks:
     """A section imported from a .docx keeps that document's formatting."""
 
     @pytest.fixture
-    def projects_doc(self, projects_cv: CV, tmp_path: Path) -> WordDocument:
-        return read(write(projects_cv, tmp_path, "projects.docx"))
+    def projects_doc(self, projects_document: Document, tmp_path: Path) -> WordDocument:
+        return read(write(projects_document, tmp_path, "projects.docx"))
 
     def test_each_project_is_a_table(self, projects_doc: WordDocument) -> None:
         assert len(projects_doc.tables) == len(SAMPLE_PROJECTS)
@@ -534,7 +628,7 @@ class TestImportedBlocks:
         assert "https://example.org/projekt" in targets
 
     def test_the_section_heading_stays_this_cv_s_own(self, projects_doc: WordDocument) -> None:
-        # Only the section's *content* is imported; the heading is the CV's.
+        # Only the section's *content* is imported; the heading is the Document's.
         assert "Projekte" in texts(projects_doc, STYLE_SECTION)
 
     def test_markdown_body_of_the_section_is_absent(self, projects_doc: WordDocument) -> None:
@@ -548,11 +642,11 @@ class TestImportedBlocks:
                     assert cell.paragraphs
 
 
-def _cv_with_table(*, centered: bool, column_widths: list[float] | None = None) -> CV:
+def _cv_with_table(*, centered: bool, column_widths: list[float] | None = None) -> Document:
     cell = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="x")])])
     table = RichTable(rows=[[cell, cell]], centered=centered, column_widths=column_widths or [])
     section = Section(title="Zahlen", slug="zahlen", markdown="", blocks=[table])
-    return CV(name="Ada", sections=[section])
+    return Document(name="Ada", sections=[section])
 
 
 class TestCenteredImportedTable:
@@ -578,29 +672,29 @@ class TestTheme:
         assert theme.accent == "2F5D8A"
         assert theme.body_size == 10.5
 
-    def test_theme_is_applied_to_styles(self, minimal_cv: CV, tmp_path: Path) -> None:
+    def test_theme_is_applied_to_styles(self, minimal_document: Document, tmp_path: Path) -> None:
         renderer = WordRenderer(WordTheme(body_font="Georgia", body_size=12.0))
         output = tmp_path / "themed.docx"
-        renderer.render(minimal_cv, output)
+        renderer.render(minimal_document, output)
         normal = read(output).styles["Normal"]
         assert normal.font.name == "Georgia"
         assert normal.font.size is not None
         assert normal.font.size.pt == 12.0
 
-    def test_renderer_is_reusable(self, minimal_cv: CV, tmp_path: Path) -> None:
+    def test_renderer_is_reusable(self, minimal_document: Document, tmp_path: Path) -> None:
         # Styles are added per document; a shared renderer must not trip over
         # "style already exists" on its second call.
         renderer = WordRenderer()
-        renderer.render(minimal_cv, tmp_path / "one.docx")
-        renderer.render(minimal_cv, tmp_path / "two.docx")
+        renderer.render(minimal_document, tmp_path / "one.docx")
+        renderer.render(minimal_document, tmp_path / "two.docx")
         assert (tmp_path / "two.docx").is_file()
 
 
 class TestEscaping:
     def test_xml_special_characters_are_handled(self, tmp_path: Path) -> None:
-        cv = CV(
+        doc = Document(
             name="Ada & <Lovelace>",
             contact=Contact(links=[Link(label="A & B", url="https://x.test/?a=1&b=2")]),
         )
-        document = read(write(cv, tmp_path))
+        document = read(write(doc, tmp_path))
         assert texts(document, STYLE_NAME) == ["Ada & <Lovelace>"]

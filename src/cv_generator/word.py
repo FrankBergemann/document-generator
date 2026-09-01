@@ -33,8 +33,8 @@ from markdown_it.tree import SyntaxTreeNode
 from cv_generator.errors import RenderError
 from cv_generator.markdown import inline_children, to_tree
 from cv_generator.models import (
-    CV,
     Contact,
+    Document,
     Photo,
     RichBlock,
     RichParagraph,
@@ -52,16 +52,16 @@ from cv_generator.ooxml import (
     start_hyperlink,
 )
 
-STYLE_NAME = "CV Name"
-STYLE_HEADLINE = "CV Headline"
-STYLE_CONTACT = "CV Contact"
-STYLE_SUMMARY = "CV Summary"
-STYLE_SECTION = "CV Section Heading"
-STYLE_ENTRY = "CV Entry"
-STYLE_META = "CV Entry Meta"
-STYLE_BODY = "CV Body"
-STYLE_CODE = "CV Code"
-STYLE_QUOTE = "CV Quote"
+STYLE_NAME = "Document Name"
+STYLE_HEADLINE = "Document Headline"
+STYLE_CONTACT = "Document Contact"
+STYLE_SUMMARY = "Document Summary"
+STYLE_SECTION = "Document Section Heading"
+STYLE_ENTRY = "Document Entry"
+STYLE_META = "Document Entry Meta"
+STYLE_BODY = "Document Body"
+STYLE_CODE = "Document Code"
+STYLE_QUOTE = "Document Quote"
 
 CONTACT_SEPARATOR = "   ·   "
 
@@ -70,13 +70,20 @@ A4_HEIGHT_MM = 297.0
 
 
 class _Blocks(Protocol):
-    """What the header builder needs of a document or a table cell.
+    """What the header/footer builders need of a document, table cell, or
+    page header/footer part.
 
-    With a photo the header's text goes into a table cell instead of straight
-    into the document body; both offer ``add_paragraph`` with this signature.
+    With a photo the CV header's text goes into a table cell instead of
+    straight into the document body; a page header/footer is a part of its
+    own. All three offer ``add_paragraph`` with this signature; ``paragraphs``
+    is used only to find the blank placeholder a fresh page header/footer
+    part starts with (see ``WordRenderer._add_page_part``).
     """
 
     def add_paragraph(self, text: str = "", style: str | None = None) -> Paragraph: ...
+
+    @property
+    def paragraphs(self) -> list[Paragraph]: ...
 
 
 @dataclass(frozen=True)
@@ -141,29 +148,38 @@ _PLAIN = _Fmt()
 
 
 class WordRenderer:
-    """Writes a CV as a ``.docx`` file."""
+    """Writes a Document as a ``.docx`` file."""
 
     def __init__(self, theme: WordTheme | None = None) -> None:
         self.theme = theme or WordTheme()
 
-    def render(self, cv: CV, output: Path) -> None:
-        """Write ``cv`` to ``output`` as a Word document.
+    def render(self, doc: Document, output: Path) -> None:
+        """Write ``doc`` to ``output`` as a Word document.
 
         Raises:
             RenderError: if the file cannot be written.
         """
-        document = self._new_document(cv)
-        self._add_header(document, cv)
+        document = self._new_document(doc)
+        if doc.has_identity():
+            self._add_header(document, doc)
 
-        if cv.summary:
-            self._add_blocks(document, to_tree(cv.summary).children, STYLE_SUMMARY)
+        if doc.summary:
+            self._add_blocks(document, to_tree(doc.summary).children, STYLE_SUMMARY)
 
-        for section in cv.sections:
-            self._add_section_heading(document, section.title)
+        for section in doc.sections:
+            if section.title:
+                self._add_section_heading(document, section.title)
             if section.blocks:
                 self._add_imported(document, document, section.blocks)
             else:
                 self._add_blocks(document, to_tree(section.markdown).children, STYLE_BODY)
+
+        # Real, repeating page header/footer here, unlike HTML/PDF (see
+        # document.html.j2): Word shows each on every page on its own.
+        if doc.page_header:
+            self._add_page_part(document, document.sections[-1].header, doc.page_header)
+        if doc.page_footer:
+            self._add_page_part(document, document.sections[-1].footer, doc.page_footer)
 
         output.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -171,11 +187,24 @@ class WordRenderer:
         except OSError as exc:
             raise RenderError(f"cannot write {output}: {exc}") from exc
 
+    def _add_page_part(
+        self, document: WordDocument, part: _Blocks, blocks: Sequence[RichBlock]
+    ) -> None:
+        """Write ``blocks`` into a freshly defined page header or footer.
+
+        Accessing ``.paragraphs`` is what creates the part in the first place,
+        and Word pre-populates a new one with a single blank paragraph -- the
+        same placeholder pattern as the photo header's table cell.
+        """
+        placeholder = part.paragraphs[0]
+        self._add_imported(document, part, blocks)
+        remove_paragraph(placeholder)
+
     # -- document setup ---------------------------------------------------
 
-    def _new_document(self, cv: CV) -> WordDocument:
+    def _new_document(self, doc: Document) -> WordDocument:
         document = docx.Document()
-        self._define_styles(document, cv.lang)
+        self._define_styles(document, doc.lang)
 
         page = document.sections[0]
         page.page_width = Mm(A4_WIDTH_MM)
@@ -183,8 +212,8 @@ class WordRenderer:
         page.top_margin = page.bottom_margin = Mm(self.theme.page_margin_vertical_mm)
         page.left_margin = page.right_margin = Mm(self.theme.page_margin_horizontal_mm)
 
-        document.core_properties.title = cv.name
-        document.core_properties.author = cv.name
+        document.core_properties.title = doc.name or ""
+        document.core_properties.author = doc.name or ""
         return document
 
     def _define_styles(self, document: WordDocument, lang: str) -> None:
@@ -259,9 +288,9 @@ class WordRenderer:
 
     # -- header -----------------------------------------------------------
 
-    def _add_header(self, document: WordDocument, cv: CV) -> None:
-        if cv.photo is None:
-            last = self._add_identity(document, cv)
+    def _add_header(self, document: WordDocument, doc: Document) -> None:
+        if doc.photo is None:
+            last = self._add_identity(document, doc)
             # `.cv-header { border-bottom: 1.5px solid var(--accent) }`
             add_bottom_border(last, color=self.theme.accent, size=12, space=6)
             return
@@ -284,19 +313,26 @@ class WordRenderer:
 
         identity_cell, photo_cell = table.rows[0].cells
         placeholder = identity_cell.paragraphs[0]
-        self._add_identity(identity_cell, cv)
+        self._add_identity(identity_cell, doc)
         remove_paragraph(placeholder)
-        self._add_photo(photo_cell, cv.photo)
+        self._add_photo(photo_cell, doc.photo)
 
         add_table_bottom_border(table, color=theme.accent, size=12)
 
-    def _add_identity(self, blocks: _Blocks, cv: CV) -> Paragraph:
-        """Write name, headline and contact line; returns the last paragraph."""
-        last = blocks.add_paragraph(cv.name, style=STYLE_NAME)
-        if cv.headline:
-            last = blocks.add_paragraph(cv.headline, style=STYLE_HEADLINE)
-        if not cv.contact.is_empty():
-            last = self._add_contact(blocks, cv.contact)
+    def _add_identity(self, blocks: _Blocks, doc: Document) -> Paragraph:
+        """Write name, headline and contact line; returns the last paragraph.
+
+        ``doc.name`` may be absent -- a document with no Markdown source has no
+        frontmatter to take it from -- so the paragraph is written empty rather
+        than skipped, which keeps this method's "add exactly one paragraph per
+        call" shape and so the header's own bottom rule (drawn on the paragraph
+        this method returns) always has one to draw on.
+        """
+        last = blocks.add_paragraph(doc.name or "", style=STYLE_NAME)
+        if doc.headline:
+            last = blocks.add_paragraph(doc.headline, style=STYLE_HEADLINE)
+        if not doc.contact.is_empty():
+            last = self._add_contact(blocks, doc.contact)
         return last
 
     def _add_photo(self, cell: _Cell, photo: Photo) -> None:

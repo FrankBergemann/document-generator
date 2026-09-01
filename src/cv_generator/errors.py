@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 
-class CVError(Exception):
+class DocError(Exception):
     """Base class for every error this package raises deliberately."""
 
 
-class CVParseError(CVError):
+class DocParseError(DocError):
     """The source Markdown file could not be parsed or validated."""
 
 
-class RenderError(CVError):
+class RenderError(DocError):
     """A template could not be found or rendered."""
 
 
-class PdfEngineError(CVError):
+class PdfEngineError(DocError):
     """A PDF engine was requested that is unavailable or failed."""

@@ -213,6 +213,36 @@ body {
   border: 0.5pt solid var(--rule);
 }
 
+/* Not a per-page header -- see document.html.j2. Set off from what follows it
+   the same way a source document's own header reads: smaller, muted, ruled
+   off from the body underneath. */
+.cv-page-header {
+  margin-bottom: 1.1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.cv-page-header p {
+  margin: 0;
+}
+
+/* Not a per-page footer -- see document.html.j2. Set off from the sections
+   above it the same way a source document's own footer reads: smaller,
+   muted, ruled off from the body it follows. */
+.cv-page-footer {
+  margin-top: 1.1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.cv-page-footer p {
+  margin: 0;
+}
+
 a {
   color: var(--accent);
   text-decoration: none;

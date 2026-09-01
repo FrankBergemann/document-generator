@@ -236,11 +236,17 @@ follows. (An earlier version of this same recipe imported a project list from a
 | `sections` | One entry per span, concatenated in the order listed. The only key a recipe needs. |
 | `source` | A file in the recipe's own directory, or (if not found there) relative to the project root. May be a glob — `*Projektliste*.docx` survives the list being reissued with a new date in its name — and then has to match exactly one file; the project-root fallback does not apply to a glob. |
 | `format` | Which reader parses `source`: `md`, `docx`, or `xlsx`. Required, and not guessed from `source`'s suffix — a glob or a reissued file's name is not a promise about its content. |
-| `begin` | The headline the span starts at (`.md`/`.docx` only). Matched case-insensitively, with or without its `##`. **Leave it out** and the span starts at the top of the file. |
-| `end` | The headline it stops **before** (`.md`/`.docx` only) — that headline belongs to whatever comes next and is not copied. **Leave it out** and the span runs to the end of the file. An `end` that never turns up is an error, not "run to the end": the recipe said where to stop. |
+| `begin` | The headline the span starts at (`.md`/`.docx` only) — a regular expression, matched case-insensitively and in full (plain text matches itself exactly), with or without its `##`. **Leave it out** and the span starts at the top of the file. |
+| `end` | The headline it stops **before** (`.md`/`.docx` only), matched the same way — that headline belongs to whatever comes next and is not copied. **Leave it out** and the span runs to the end of the file. An `end` that never turns up is an error, not "run to the end": the recipe said where to stop. |
 | `col-start` / `col-end` / `row-start` / `row-end` | The cell rectangle to copy (`xlsx` only), Excel's own way — column letters and 1-based row numbers, **both ends inclusive**. Required together; rejected for any other `format`. |
-| `title` | Renames the span's first section. Required for an `xlsx` entry, which has no `begin` to fall back on. |
-| `output` | The stem the results take: `dist/document.html`, `dist/document.docx`, `dist/document.pdf`. Defaults to that of the file the header came from — `document.md`, hence `dist/document.*`. |
+| `title` | Renames a `.docx`/`.xlsx` span's section. Never required: falls back to `begin` (the heading it starts at) if there is one. With neither, the section shows **no heading at all** — a filename is not a title, and this holds for every section, not just the first — a Markdown span already takes its titles from its own `##` headings and is never affected. |
+| `output` | The stem the results take: `dist/document.html`, `dist/document.docx`, `dist/document.pdf`. Defaults to that of the file the header came from — `document.md`, hence `dist/document.*`. Mutually exclusive with `target`, which also picks the directory. |
+| `target` | Where the results go **and** what they're called, relative to the project root and with no extension — `"exports/lebenslauf"` becomes `exports/lebenslauf.html`, `.docx`, `.pdf`. Use this instead of `output` when the results shouldn't land in `dist/`. `-o`/`--out` still overrides either. |
+| `photo` | A portrait image, resolved the same way `source` is. The non-Markdown equivalent of frontmatter's `photo:` key — use it when the recipe has no Markdown source, or its Markdown source has none of its own. Wins over a Markdown-supplied photo when both are present. |
+
+If the recipe's **first** entry is a `.docx` (specifically the first one, not just the first `.docx` anywhere in the recipe), that one file's own page header *and* footer are both carried over as the target document's page header and footer — exclusively, so the result is never stitched together from two different letterheads. A letterhead-style first page often carries a running header (name, page numbers) and a footer (address, bank details) that are otherwise nowhere a recipe could name. `.docx` output gets a real, repeating page header/footer; HTML/PDF have no such per-page concept, so there each appears once — the header at the top, the footer at the end.
+
+Blank lines from a `.docx` source — in a section, a page header or a page footer — are kept, not dropped: the source document's own spacing is part of what it looked like.
 
 ### Where the header comes from
 
@@ -258,17 +264,24 @@ To take a file's header and none of its sections, end at its first heading:
 
 A later entry that also starts at the top contributes only its sections: the CV
 has one name and one summary, and the first entry to supply them is the one that
-does. If no entry starts at the top of a Markdown file, the build fails saying so
-— a CV with no name is not a document.
+does. **No entry has to be Markdown at all** — a recipe built purely from
+`.docx`/`.xlsx` (an invoice, say) still builds, just with a bare header: no
+name, headline, contact or summary, and `dist/document.*` unless `output` or
+`target` says otherwise. A photo, if it wants one, comes from the root-level
+`photo` key instead of frontmatter (see [The recipe](#the-recipe) above). With
+nothing in it at all — no name, headline, contact or photo — the header itself
+is left out of the result, rather than rendering as an empty block with a rule
+drawn under nothing.
 
 ### Spans
 
 A **Markdown span is split at its own `##` headings**, the way a single-file CV
 is, so the third entry above contributes three sections, each with its own
 heading and anchor. A **`.docx` or `.xlsx` span is one section**: imported
-blocks and an imported cell rectangle have no headings of their own to split at
-— and nothing to name it after, so such an entry needs a `title` (always, for
-`.xlsx`; only when it has no `begin` either, for `.docx`).
+blocks and an imported cell rectangle have no headings of their own to split at.
+Titling it never needs a `title` key: a `.docx` entry falls back to `begin`
+(the heading it starts at) if there is one, and either format falls back to the
+source file's own stem — `title` is only for when neither reads well.
 
 Unknown keys are rejected, so a typo fails loudly rather than silently dropping a
 section. A file may be used any number of times, and the spans need not be in the
@@ -320,7 +333,7 @@ Word's own bullet styles.
 data/config.json ─── config.py ──┐            ┌─ render.py ─> HTML ─┬─> .html
   which span, which file         │            │                     └─ pdf/chrome.py ─> .pdf
 data/document.md ──────────────────────┼ parser.py ─┤        (pydantic)
-  frontmatter + Markdown         │  CV model  └─ word.py ──────────────────────────────> .docx
+  frontmatter + Markdown         │ Document model └─ word.py ─────────────────────────> .docx
 *Projektliste*.docx ─────────────┤
   "Projekthistorie"   docx_import.py
 *.xlsx ───────────────────────────┘
@@ -329,7 +342,7 @@ data/document.md ─────────────────────
 
 - [src/cv_generator/config.py](src/cv_generator/config.py) — the recipe's schema, and resolving a `source` to one file
 - [src/cv_generator/parser.py](src/cv_generator/parser.py) — the source files → model
-- [src/cv_generator/models.py](src/cv_generator/models.py) — the validated `CV` schema
+- [src/cv_generator/models.py](src/cv_generator/models.py) — the validated `Document` schema
 - [src/cv_generator/markdown.py](src/cv_generator/markdown.py) — the one Markdown parser both backends share
 - [src/cv_generator/docx_import.py](src/cv_generator/docx_import.py) — a Word section → blocks in the model
 - [src/cv_generator/xlsx_import.py](src/cv_generator/xlsx_import.py) — a cell rectangle → blocks in the model
@@ -340,12 +353,14 @@ data/document.md ─────────────────────
 - [src/cv_generator/templates/](src/cv_generator/templates/) — HTML themes (`document.html.j2` + `document.css`)
 
 **The photo is read by the parser, not by the backends.** `photo:` is the one
-key naming another file, resolved relative to the `.md` so a CV and its portrait
-travel together. The model then carries the *bytes*, which is what lets the HTML
-stay self-contained and the `.docx` embed the image, with neither output stage
-touching the disk. Only formats both backends understand are accepted — PNG,
-JPEG and GIF, sniffed from the content rather than trusted from the extension —
-so a photo cannot render in one format and silently vanish from another.
+frontmatter key naming another file, resolved relative to the `.md` so a CV and
+its portrait travel together; `config.json`'s root-level `photo` key does the
+same job for a recipe with no Markdown source of its own. The model then
+carries the *bytes*, which is what lets the HTML stay self-contained and the
+`.docx` embed the image, with neither output stage touching the disk. Only
+formats both backends understand are accepted — PNG, JPEG and GIF, sniffed from
+the content rather than trusted from the extension — so a photo cannot render in
+one format and silently vanish from another.
 
 **Sections stay as Markdown in the model.** Not as a rigid schema of jobs and
 dates, so the Markdown file rather than the model decides how a section is laid
@@ -412,11 +427,11 @@ mirrored in `WordTheme` ([word.py](src/cv_generator/word.py)). Themes given with
 
 ```python
 from pathlib import Path
-from cv_generator import WordRenderer, WordTheme, load_cv
+from cv_generator import WordRenderer, WordTheme, load_doc
 
-cv, name = load_cv(Path("data/config.json"))  # or a plain .md
+doc, name, target = load_doc(Path("data/config.json"))  # or a plain .md
 theme = WordTheme(body_font="Georgia", accent="7A2E2E")
-WordRenderer(theme).render(cv, Path(f"dist/{name}.docx"))
+WordRenderer(theme).render(doc, Path(f"dist/{name}.docx"))
 ```
 
 Not supported: images inside section Markdown (the header photo is; `![...]()`

@@ -2,7 +2,7 @@
 <html lang="{{ document.lang }}">
 <head>
 <meta charset="utf-8">
-<title>{{ document.name }}{% if document.headline %} - {{ document.headline }}{% endif %}</title>
+<title>{{ [document.name, document.headline] | select | join(" - ") }}</title>
 <style>
 {{ stylesheet }}
 </style>
@@ -10,9 +10,22 @@
 <body>
 <main class="cv">
 
+  {% if document.page_header %}
+  {# Not a per-page header -- HTML/PDF are one continuous document, so this
+     appears once, at the top, unlike the .docx output's real page header. #}
+  <header class="cv-page-header">
+    {{ document.page_header | blocks }}
+  </header>
+  {% endif %}
+
+  {% if document.has_identity() %}
+  {# A recipe with no Markdown source has no name, headline or contact to show
+     -- the header (and the rule under it) would then be an empty bar. #}
   <header class="cv-header">
     <div class="cv-identity">
+      {% if document.name %}
       <h1 class="cv-name">{{ document.name }}</h1>
+      {% endif %}
       {% if document.headline %}
       <p class="cv-headline">{{ document.headline }}</p>
       {% endif %}
@@ -36,9 +49,10 @@
     {% if document.photo %}
     {# Embedded as a data URL, never as a file reference: the PDF browser may be
        in another container and cannot read this filesystem. #}
-    <img class="cv-photo" src="{{ document.photo.data_uri() }}" alt="{{ document.name }}">
+    <img class="cv-photo" src="{{ document.photo.data_uri() }}" alt="{{ document.name or '' }}">
     {% endif %}
   </header>
+  {% endif %}
 
   {% if document.summary %}
   <section class="cv-summary">
@@ -50,7 +64,9 @@
   {# A section is either Markdown from the .md or blocks imported from a .docx;
      the extra class lets an imported section page-break between its blocks. #}
   <section class="cv-section{% if section.blocks %} cv-section--blocks{% endif %}" id="{{ section.slug }}">
+    {% if section.title %}
     <h2>{{ section.title }}</h2>
+    {% endif %}
     {% if section.blocks %}
     {{ section.blocks | blocks }}
     {% else %}
@@ -58,6 +74,14 @@
     {% endif %}
   </section>
   {% endfor %}
+
+  {% if document.page_footer %}
+  {# Not a per-page footer -- HTML/PDF are one continuous document, so this
+     appears once, at the end, unlike the .docx output's real page footer. #}
+  <footer class="cv-page-footer">
+    {{ document.page_footer | blocks }}
+  </footer>
+  {% endif %}
 
 </main>
 </body>

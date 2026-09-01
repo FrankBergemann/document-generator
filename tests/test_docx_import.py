@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import docx
 import pytest
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 
-from cv_generator.docx_import import load_section
-from cv_generator.errors import CVParseError
+from cv_generator.docx_import import load_footer, load_section
+from cv_generator.errors import DocParseError
 from cv_generator.models import RichBlock, RichParagraph, RichRun, RichTable
 from tests.support import (
     AFTER_SECTION,
@@ -75,22 +78,59 @@ class TestNamedEnd:
     def test_it_is_matched_case_insensitively(self, projektliste: Path) -> None:
         assert load_section(projektliste, "Projekthistorie", "AUSBILDUNG")
 
+    def test_it_may_be_a_regular_expression(self, projektliste: Path) -> None:
+        blocks = load_section(projektliste, "Projekthistorie", "Ausbild.*")
+        assert "Ausbildung" not in texts(blocks)
+
+    def test_a_regular_expression_still_matches_the_whole_heading(self, projektliste: Path) -> None:
+        # Not a substring search: "Ausbild" alone must not match "Ausbildung" --
+        # otherwise a paragraph merely mentioning a heading's name would be
+        # mistaken for the heading itself.
+        with pytest.raises(DocParseError, match="no heading matching 'Ausbild' follows"):
+            load_section(projektliste, "Projekthistorie", "Ausbild")
+
+    def test_an_invalid_regular_expression_is_a_clean_error(self, projektliste: Path) -> None:
+        with pytest.raises(DocParseError, match="not a valid regular expression"):
+            load_section(projektliste, "Projekthistorie", "Ausbildung(")
+
     def test_an_end_that_never_comes_is_an_error(self, projektliste: Path) -> None:
         # Not "run to the end of the document": the recipe said where to stop,
         # so importing the rest would put another section's content in this one.
-        with pytest.raises(CVParseError, match="no heading 'Publikationen' follows"):
+        with pytest.raises(DocParseError, match="no heading matching 'Publikationen' follows"):
             load_section(projektliste, "Projekthistorie", "Publikationen")
 
     def test_an_end_before_the_beginning_does_not_count(self, projektliste: Path) -> None:
-        with pytest.raises(CVParseError, match="no heading 'Profil' follows"):
+        with pytest.raises(DocParseError, match="no heading matching 'Profil' follows"):
             load_section(projektliste, "Projekthistorie", "Profil")
+
+    def test_end_may_match_a_line_whose_wording_varies(self, tmp_path: Path) -> None:
+        # A form letter's closing line names a value (here, a payment term) that
+        # changes from one letter to the next, so no fixed string names it -- a
+        # wildcard standing in for the variable part still covers the whole line.
+        document = docx.Document()
+        document.add_paragraph("Vielen Dank für Ihr Vertrauen.")
+        document.add_paragraph("Bitte überweisen Sie den Betrag innerhalb von 14 Tagen.")
+        document.add_paragraph("Anlage: Rechnungsdetails")
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(
+            path, end=r"Bitte überweisen Sie den Betrag innerhalb von \d+ Tagen\."
+        )
+        assert "Vielen Dank für Ihr Vertrauen." in texts(blocks)
+        assert "Bitte überweisen" not in texts(blocks)
+        assert "Anlage: Rechnungsdetails" not in texts(blocks)
 
 
 class TestSectionBoundaries:
-    def test_one_block_per_project(self, blocks: list[RichBlock]) -> None:
-        # The blank paragraphs Word needs between two tables are not content.
-        assert len(blocks) == len(SAMPLE_PROJECTS)
+    def test_one_table_per_project(self, blocks: list[RichBlock]) -> None:
         assert len(tables(blocks)) == len(SAMPLE_PROJECTS)
+
+    def test_the_blank_paragraphs_between_tables_are_kept(self, blocks: list[RichBlock]) -> None:
+        # The source needs one to keep two tables from merging when Word
+        # renders them, and it is otherwise indistinguishable from any other
+        # blank line -- so, like any other blank paragraph, it is kept.
+        assert len(blocks) == 2 * len(SAMPLE_PROJECTS) + 1
 
     def test_earlier_sections_are_not_imported(self, blocks: list[RichBlock]) -> None:
         assert BEFORE_HEADING not in texts(blocks)
@@ -100,6 +140,9 @@ class TestSectionBoundaries:
 
     def test_heading_is_matched_case_insensitively(self, projektliste: Path) -> None:
         assert load_section(projektliste, "projekthistorie")
+
+    def test_heading_may_be_a_regular_expression(self, projektliste: Path) -> None:
+        assert load_section(projektliste, "Projekt.*orie")
 
     def test_blank_paragraph_inside_a_cell_is_kept(self, blocks: list[RichBlock]) -> None:
         period = tables(blocks)[0].rows[0][0]
@@ -113,18 +156,32 @@ class TestSectionBoundaries:
         ]
 
     def test_missing_heading_is_an_error(self, projektliste: Path) -> None:
-        with pytest.raises(CVParseError, match="no heading 'Projekte' found"):
+        with pytest.raises(DocParseError, match="no heading matching 'Projekte' found"):
             load_section(projektliste, "Projekte")
 
-    def test_empty_section_is_an_error(self, tmp_path: Path) -> None:
+    def test_a_section_of_only_blank_paragraphs_is_not_empty(self, tmp_path: Path) -> None:
+        # Blank paragraphs are content now (they preserve the source's own
+        # spacing), so a section that is only blank lines is not the same as
+        # no section at all.
         path = write_projektliste(tmp_path / PROJEKTLISTE_NAME, [])
-        with pytest.raises(CVParseError, match="nothing follows the heading"):
-            load_section(path, "Projekthistorie")
+        blocks = load_section(path, "Projekthistorie", "Ausbildung")
+        assert len(blocks) == 1
+        assert blocks[0].text() == ""  # type: ignore[union-attr]
+
+    def test_a_heading_immediately_followed_by_the_end_is_an_error(self, tmp_path: Path) -> None:
+        # Nothing at all between the two headings, not even a blank paragraph.
+        document = docx.Document()
+        document.add_paragraph("Start")
+        document.add_paragraph("End")
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        with pytest.raises(DocParseError, match="nothing follows the heading"):
+            load_section(path, "Start", "End")
 
     def test_a_file_that_is_not_a_word_document(self, tmp_path: Path) -> None:
         path = tmp_path / "Projektliste.docx"
         path.write_text("just text", encoding="utf-8")
-        with pytest.raises(CVParseError, match="as a Word document"):
+        with pytest.raises(DocParseError, match="as a Word document"):
             load_section(path, "Projekthistorie")
 
 
@@ -186,3 +243,111 @@ class TestTableGeometry:
         # Unlike an `.xlsx` range, a `.docx` table is meant to fill the page the
         # way it did in the source document.
         assert all(not table.centered for table in tables(blocks))
+
+
+def _write_footer_docx(path: Path, *, footer_paragraphs: list[str] | None = None) -> None:
+    """A minimal `.docx` with a body paragraph and, optionally, a footer."""
+    document = docx.Document()
+    document.add_paragraph("Body content.")
+    if footer_paragraphs:
+        footer = document.sections[0].footer
+        footer.is_linked_to_previous = False
+        footer.paragraphs[0].text = footer_paragraphs[0]
+        for text in footer_paragraphs[1:]:
+            footer.add_paragraph(text)
+    document.save(str(path))
+
+
+class TestFooter:
+    def test_a_plain_footer_paragraph_is_read(self, tmp_path: Path) -> None:
+        path = tmp_path / "brief.docx"
+        _write_footer_docx(path, footer_paragraphs=["Footer line"])
+        blocks = load_footer(path)
+        assert len(blocks) == 1
+        assert blocks[0].text() == "Footer line"  # type: ignore[union-attr]
+
+    def test_a_document_with_no_footer_definition_returns_nothing(self, tmp_path: Path) -> None:
+        path = tmp_path / "brief.docx"
+        _write_footer_docx(path)
+        assert load_footer(path) == []
+
+    def test_blank_footer_paragraphs_are_kept(self, tmp_path: Path) -> None:
+        path = tmp_path / "brief.docx"
+        _write_footer_docx(path, footer_paragraphs=["", "Real line", ""])
+        blocks = load_footer(path)
+        assert [b.text() for b in blocks] == ["", "Real line", ""]  # type: ignore[union-attr]
+
+    def test_formatting_is_preserved(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        document.add_paragraph("Body")
+        footer = document.sections[0].footer
+        footer.is_linked_to_previous = False
+        run = footer.paragraphs[0].add_run("Bold footer")
+        run.bold = True
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        blocks = load_footer(path)
+        assert blocks[0].runs[0].bold is True  # type: ignore[union-attr]
+
+    def test_the_first_page_footer_wins_when_it_has_content(self, tmp_path: Path) -> None:
+        # A single-page letter shows only its first-page footer; the "default"
+        # one, meant for a second page that never comes, is typically empty.
+        document = docx.Document()
+        document.add_paragraph("Body")
+        section = document.sections[0]
+        section.different_first_page_header_footer = True
+        section.first_page_footer.is_linked_to_previous = False
+        section.first_page_footer.paragraphs[0].text = "First-page footer"
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        blocks = load_footer(path)
+        assert len(blocks) == 1
+        assert blocks[0].text() == "First-page footer"  # type: ignore[union-attr]
+
+    def test_the_default_footer_is_used_when_the_first_page_one_is_empty(
+        self, tmp_path: Path
+    ) -> None:
+        document = docx.Document()
+        document.add_paragraph("Body")
+        section = document.sections[0]
+        section.different_first_page_header_footer = True
+        section.footer.is_linked_to_previous = False
+        section.footer.paragraphs[0].text = "Default footer"
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        blocks = load_footer(path)
+        assert len(blocks) == 1
+        assert blocks[0].text() == "Default footer"  # type: ignore[union-attr]
+
+    def test_a_text_box_s_alternate_content_is_read_only_once(self, tmp_path: Path) -> None:
+        # A letterhead-style footer commonly anchors its content in a text box,
+        # written twice in the XML -- once as the modern shape (`mc:Choice`),
+        # once as a legacy fallback (`mc:Fallback`) for a Word too old to read
+        # the first. Only one is ever shown, and only one may be read.
+        document = docx.Document()
+        document.add_paragraph("Body")
+        footer = document.sections[0].footer
+        footer.is_linked_to_previous = False
+        run_xml = f"""
+        <w:r {nsdecls("w")}
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+          <mc:AlternateContent>
+            <mc:Choice Requires="wps">
+              <w:pict><w:txbxContent>
+                <w:p><w:r><w:t>Choice text</w:t></w:r></w:p>
+              </w:txbxContent></w:pict>
+            </mc:Choice>
+            <mc:Fallback>
+              <w:pict><w:txbxContent>
+                <w:p><w:r><w:t>Fallback text</w:t></w:r></w:p>
+              </w:txbxContent></w:pict>
+            </mc:Fallback>
+          </mc:AlternateContent>
+        </w:r>
+        """
+        footer.paragraphs[0]._p.append(parse_xml(run_xml))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        texts = [block.text() for block in load_footer(path)]  # type: ignore[union-attr]
+        assert "Choice text" in texts
+        assert "Fallback text" not in texts

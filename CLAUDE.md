@@ -155,10 +155,11 @@ CV section touches exactly one place — and a section is a line of JSON, not co
 `config.py` is the recipe's schema plus `resolve_source` (a `source` value → the
 one file it names); `parser.py` is the only stage that reads source files, so the
 backends see one finished model and never learn how many files went into it.
-`load_cv(path)` is the single entry point both `build` and `validate` use: it
-dispatches on the suffix (`.json` → recipe, else a lone `.md`) and returns the CV
-together with the stem its outputs take. That stem is the recipe's `output`, *not*
-the recipe file's name — `dist/config.html` would be nobody's document.
+`load_doc(path)` is the single entry point both `build` and `validate` use: it
+dispatches on the suffix (`.json` → recipe, else a lone `.md`) and returns the
+Document together with the stem its outputs take. That stem is the recipe's
+`output`, *not* the recipe file's name — `dist/config.html` would be nobody's
+document.
 
 ## Conventions that matter here
 
@@ -171,19 +172,22 @@ the recipe file's name — `dist/config.html` would be nobody's document.
   there enables it everywhere at once — do not add a second parser instance.
 - **The photo is loaded in the parser, and the model holds bytes.** `photo:` is
   the only frontmatter key naming another file; it is resolved relative to the
-  `.md` and read by `parser.load_photo`, so `CV` is complete on its own and no
-  backend touches the filesystem. That is what keeps the HTML self-contained (see
-  below) and lets `.docx` embed the same image. Accepted formats are the
+  `.md` and read by `parser.load_photo`, so `Document` is complete on its own and
+  no backend touches the filesystem. That is what keeps the HTML self-contained
+  (see below) and lets `.docx` embed the same image. Accepted formats are the
   intersection of what both backends handle — PNG, JPEG, GIF, sniffed from the
   content — so nothing can render in one output format and vanish from another.
+  A recipe with no Markdown source (or one whose Markdown source has no
+  `photo:`) has no frontmatter to name a photo in, so `config.json`'s root-level
+  `photo` key does the same job — see [The recipe](#the-recipe).
 - **Frontmatter and `config.json` reject unknown keys** (`extra="forbid"` on every
   model, in [models.py](src/cv_generator/models.py) and
   [config.py](src/cv_generator/config.py) alike). A typo must fail loudly rather
   than be silently dropped — a mistyped recipe key would otherwise render a
   document with a section missing. Keep it that way when adding fields.
-- **Errors raised on purpose subclass `CVError`** ([errors.py](src/cv_generator/errors.py)).
-  `cli.main` catches `CVError` and turns it into a one-line stderr message with
-  exit code 1. Anything not worth that treatment should not be a `CVError`.
+- **Errors raised on purpose subclass `DocError`** ([errors.py](src/cv_generator/errors.py)).
+  `cli.main` catches `DocError` and turns it into a one-line stderr message with
+  exit code 1. Anything not worth that treatment should not be a `DocError`.
 - **Trusted markup is wrapped in `Markup` in Python, never `| safe` in a
   template.** `render.py` wraps the stylesheet and the Markdown-derived HTML, so a
   theme author cannot accidentally escape CSS (`>` → `&gt;` breaks child
@@ -219,13 +223,13 @@ the recipe file's name — `dist/config.html` would be nobody's document.
 
 ## The recipe
 
-[config.py](src/cv_generator/config.py) is the schema; `parser.build_cv` is the
+[config.py](src/cv_generator/config.py) is the schema; `parser.build_doc` is the
 assembly. A `sections` entry copies one span of one file:
 
 - **`format` says which reader parses `source`, and is required.** `"md"`,
   `"docx"` or `"xlsx"` — not guessed from `source`'s own suffix, because `source`
   may be a glob or a reissued file whose name is not a promise about its
-  content. This is what `build_cv` switches on; it does not look at the resolved
+  content. This is what `build_doc` switches on; it does not look at the resolved
   path's suffix at all.
 - **An `"xlsx"` entry names a cell rectangle, not headlines.** `col-start`,
   `col-end`, `row-start` and `row-end` (a `SectionSpec` model validator requires
@@ -256,12 +260,61 @@ assembly. A `sections` entry copies one span of one file:
   directory) wins when a file exists in both places, so this is a fallback, not a
   second meaning — a section may point at a file kept at the top of the project
   instead of beside the recipe that names it. The fallback does not apply to a
-  glob. `build_cv`'s callers pass `project_root=Path.cwd()`, which is the project
+  glob. `build_doc`'s callers pass `project_root=Path.cwd()`, which is the project
   root by the same convention that makes the CLI's own default source
   (`data/config.json`) relative to it: `run/*.sh` all `cd` there first.
 - **The `output` name comes from the recipe, not from the recipe file.** Every
   project's recipe is called `config.json`; `dist/config.html` would be nobody's
-  document. `load_cv` returns the CV and that name together for this reason.
+  document. `load_doc` returns the Document and that name together for this reason.
+- **`target` picks the whole output path, not just the name, and is mutually
+  exclusive with `output`.** A path relative to the project root, without an
+  extension -- `"exports/lebenslauf"` becomes `exports/lebenslauf.html`, `.docx`,
+  `.pdf` -- resolved the same way `source`'s project-root fallback is, against
+  `Path.cwd()` by convention. `output` only ever renamed the file inside the
+  fixed `dist/`; `target` subsumes that, so a `BuildConfig` validator rejects a
+  recipe naming both, the same "two ways to say one thing" reasoning as
+  `metadata` vs. an entry with no `begin`. `-o`/`--out` at the command line still
+  wins over either, since it is the most specific override. `LoadedDocument.target`
+  carries the resolved path (or `None`) from `build_doc` through to the CLI.
+- **`title` never has to be given, and a `.docx`/`.xlsx` entry never falls
+  back to its filename to invent one.** A missing `title` falls back to
+  `begin` (the heading the span starts at) if there is one; with neither, the
+  section renders with **no heading at all** (`Section.title = None`, and
+  every renderer skips the heading) rather than one made of the source file's
+  own name -- a filename names the file, not what a reader would call the
+  content. This holds for every section, not just the document's first one.
+  The slug still falls back to `path.stem` regardless: an anchor has to point
+  *somewhere* even when nothing is shown for it.
+- **No entry has to be Markdown.** A recipe built purely from `.docx`/`.xlsx`
+  (an invoice, say) still assembles: `build_doc` falls back to a bare header
+  (no name, headline, contact or summary) instead of raising, and the output
+  stem falls back to `DEFAULT_NAME` (`"document"`) instead of a Markdown file's
+  own stem -- `output`/`target` still override it the same way. `Document.name`
+  is `str | None` for this reason; every renderer treats an absent name as "no
+  header line" rather than crashing or printing the literal text `"None"`.
+  `Document.has_identity()` (name, headline, contact or photo -- any one is
+  enough) is what "no header line" means precisely: with nothing at all, both
+  backends skip the header block entirely instead of rendering an empty one
+  that still draws its own rule under nothing.
+- **`photo` at the recipe's root is the non-Markdown equivalent of frontmatter's
+  `photo:`.** Resolved the same way a section's `source` is (config directory,
+  then project root). It wins over a Markdown-sourced photo when both are
+  present, the same way `target` wins over a Markdown file's own stem -- one
+  recipe, one photo, no guessing which one counts.
+- **If the recipe's first entry is a `.docx`, its own page header *and*
+  footer become `Document.page_header`/`page_footer`, exclusively.** Not the
+  first `.docx` entry anywhere in the recipe -- specifically
+  `config.sections[0]` -- and not whichever entry happens to carry a header or
+  footer: one source of truth for both, so a document's page furniture is
+  never stitched together from two different letterheads. This is unrelated to
+  the *identity* header (name/headline/contact/photo), which may still come
+  from a later, Markdown entry -- see :data:`DEFAULT_NAME` and
+  `Document.has_identity`. `docx_import.load_header`/`load_footer` read them
+  (see *Imported Word sections* below); `word.py` writes them back out as a
+  real, repeating page header/footer, since that is what a `.docx` actually
+  has. HTML/PDF have no such per-page concept, so there each renders once --
+  the header at the top, the footer at the end of the (one, continuous)
+  document.
 - **Slugs are deduplicated across the whole document** (`_Slugger`), not per
   file. Two sources easily use the same heading, and slugs are the HTML anchors.
 
@@ -288,9 +341,14 @@ Three things that look arbitrary and are not:
   (`<w:b w:val="0"/>`), so reading only the direct properties makes them bold and
   reading only the style makes them huge. `None` means "not set here", `False` is
   a value.
-- **Blank paragraphs are dropped between blocks and kept inside cells.** Between
-  two tables they are Word's way of stopping the tables from merging; inside a
-  cell they are the layout.
+- **Blank paragraphs are kept, not dropped.** A source document's own spacing
+  is part of what it looked like -- between two tables it also happens to be
+  Word's own way of stopping them from merging, but that is a side effect of
+  keeping it, not the reason. `_section_of`/`load_section` no longer filter
+  them out; `_is_blank` does not exist any more. A section entirely of blank
+  paragraphs is not the same as no section -- see
+  `TestSectionBoundaries::test_a_section_of_only_blank_paragraphs_is_not_empty`
+  in [tests/test_docx_import.py](tests/test_docx_import.py).
 
 Font family, page setup and paragraph spacing are *not* imported: they stay the
 CV's own, or the projects would drag a second document's design into the document. In
@@ -302,6 +360,40 @@ The fixture is *built*, not committed: `write_projektliste` in
 [tests/support.py](tests/support.py) writes a document with the real one's shape
 (bold 12pt headings, per-project tables, direct `numPr` bullets, a section before
 and after the imported one). A committed `.docx` would be an opaque blob.
+
+### The first entry's page header and footer
+
+`docx_import.load_header`/`load_footer` are a second, separate way in -- not a
+section's `blocks`, but `Document.page_header`/`page_footer` (see *The
+recipe* above). Both share `_hdrftr_blocks` and the same three things about it
+that are not obvious from a plain read of the OOXML:
+
+- **A letterhead-style header/footer's real content usually lives inside an
+  anchored text box, not a direct child paragraph of the part.**
+  `w:txbxContent` paragraphs sit several levels below `w:hdr`/`w:ftr` --
+  inside `w:r` → `mc:AlternateContent` → `w:drawing`/`w:pict` → the text box --
+  so `_hdrftr_blocks` searches every paragraph under the part, at any depth,
+  rather than only its top-level ones. The text box's own floating position is
+  meaningless outside Word anyway, so flattening it into reading order loses
+  nothing this project could have kept.
+- **`mc:AlternateContent` holds two equivalent copies, and only one may be
+  read.** `mc:Choice` is the modern DrawingML shape; `mc:Fallback` is a VML
+  shape carrying the *same* text, for a Word too old to read the first. Word
+  itself renders exactly one, so reading both would double every paragraph
+  inside a text box -- `_hdrftr_blocks` skips a paragraph whose ancestor is
+  `mc:Fallback`.
+- **The first-page part is tried before the default one.** A short,
+  single-page document -- an invoice, typically -- shows only its first-page
+  header/footer; the "default" one, meant for a second page that never comes,
+  is usually empty. Which of the two actually has content decides which
+  `load_header`/`load_footer` return -- `_has_text`, not merely "did reading
+  it produce any blocks at all": accessing `.paragraphs` on an undefined part
+  creates one blank placeholder paragraph of its own, which would otherwise
+  look like content and stop the fallback to the part that has the real thing.
+
+Tables are not read here, unlike a section import -- a footer's own content is
+plain paragraphs in every case this project has met, and `_Blocks` (the
+protocol `word.py` writes through) has no `add_table`.
 
 ## Imported Excel ranges
 

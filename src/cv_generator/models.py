@@ -1,7 +1,7 @@
 """Validated data model for a document.
 
 The model deliberately keeps section *content* as raw Markdown rather than
-modelling every possible CV structure (jobs, dates, bullet lists, ...) and
+modelling every possible Document structure (jobs, dates, bullet lists, ...) and
 rather than pre-rendering it to HTML. Markdown is the one representation every
 output backend can consume: the HTML renderer converts it to HTML, the Word
 renderer walks its syntax tree. Pre-rendering to HTML would force ``.docx``
@@ -37,7 +37,7 @@ class Link(BaseModel):
 
 
 class Contact(BaseModel):
-    """Contact block rendered in the CV header."""
+    """Contact block rendered in the Document header."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -73,7 +73,7 @@ class Photo(BaseModel):
 class RichRun(BaseModel):
     """A stretch of text with the formatting it carried in the source document.
 
-    Font *family* is deliberately absent: it is the one attribute the CV's own
+    Font *family* is deliberately absent: it is the one attribute the Document's own
     theme should keep deciding, and a Word document usually names it indirectly
     (a theme font) anyway.
     """
@@ -122,7 +122,7 @@ class RichTable(BaseModel):
     rows: list[list[RichCell]] = Field(default_factory=list)
     bordered: bool = False
     # Column widths as fractions of the table width, or empty if the source did
-    # not fix them. Fractions rather than absolute widths: the CV's page may be
+    # not fix them. Fractions rather than absolute widths: the Document's page may be
     # narrower than the document the table came from. Ignored when `centered`
     # (see below) -- a table sized to fill the page has no room to be centered in.
     column_widths: list[float] = Field(default_factory=list)
@@ -148,23 +148,45 @@ class Section(BaseModel):
     from a ``config.json`` draws its sections from several files, so "where did
     this one come from?" is a question ``validate`` has to be able to answer; it
     is ``None`` when there is nothing to disambiguate.
+
+    ``title`` is ``None`` for an imported section whose entry named neither
+    ``title`` nor ``begin``: the section still exists and still needs a
+    ``slug`` (an anchor has to point *somewhere*), but a bare filename is not a
+    title worth showing a reader, so no heading is rendered for one -- see
+    :func:`cv_generator.parser._copy_docx`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str
+    title: str | None
     slug: str
     markdown: str
     blocks: list[RichBlock] = Field(default_factory=list)
     source: str | None = None
 
 
-class CV(BaseModel):
-    """A complete CV, ready to hand to any output backend."""
+class Document(BaseModel):
+    """A complete Document, ready to hand to any output backend.
+
+    ``name`` is optional: a document assembled from no Markdown source (a
+    ``.docx``/``.xlsx``-only recipe -- an invoice, say) has no frontmatter to
+    take it from, and no identity is still a valid document, just one with no
+    header line.
+
+    ``page_header``/``page_footer`` are content -- the recipe's first
+    ``.docx`` entry supplies both, exclusively (see
+    :func:`cv_generator.parser.build_doc`), whatever entry HTML/PDF's
+    ``document.name``/``headline``/``contact`` header comes from. Neither is a
+    per-page running element in this model, only in the one backend that has
+    such a thing: see :mod:`cv_generator.docx_import` for where they come from
+    and :mod:`cv_generator.word` for how ``.docx`` output renders them as
+    actual, repeating page header/footer; HTML/PDF place each once, at the top
+    and bottom of the (one, continuous) page.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
+    name: str | None = None
     headline: str | None = None
     lang: str = "de"
     theme: str = "classic"
@@ -172,7 +194,19 @@ class CV(BaseModel):
     photo: Photo | None = None
     summary: str | None = None
     sections: list[Section] = Field(default_factory=list)
+    page_header: list[RichBlock] = Field(default_factory=list)
+    page_footer: list[RichBlock] = Field(default_factory=list)
 
     def section(self, slug: str) -> Section | None:
-        """Look up a section by slug, or ``None`` if the CV has no such section."""
+        """Look up a section by slug, or ``None`` if the Document has no such section."""
         return next((s for s in self.sections if s.slug == slug), None)
+
+    def has_identity(self) -> bool:
+        """Whether there is anything to put in the header at all.
+
+        A recipe with no Markdown source has no frontmatter to take a name,
+        headline, contact or photo from -- an empty header would still draw
+        its own rule under nothing, so both backends skip the header entirely
+        rather than render that bar.
+        """
+        return bool(self.name or self.headline or not self.contact.is_empty() or self.photo)

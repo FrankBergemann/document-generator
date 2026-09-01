@@ -1,8 +1,8 @@
 """The build recipe: which sections the target document has, and where each comes from.
 
-A CV is normally assembled from more than one file. The prose is written in
+A Document is normally assembled from more than one file. The prose is written in
 Markdown, but a project list is maintained in Word and sent to clients from
-there, so Word stays its source of truth; a second CV may reuse the same project
+there, so Word stays its source of truth; a second Document may reuse the same project
 list with a different summary. ``config.json`` is where that composition is
 written down::
 
@@ -31,20 +31,34 @@ Five rules decide what a span *is*:
   addressing, both ends inclusive, unlike the exclusive ``end`` below. See
   :mod:`cv_generator.xlsx_import` for what "keeping the formatting" means for a
   spreadsheet.
-* **``begin`` and ``end`` are headlines, and neither is required.** The span runs
+* **``begin`` and ``end`` are regular expressions matched against a headline, and
+  neither is required.** Plain text -- a heading has no regex syntax in it --
+  keeps matching exactly the one heading it names, the same as before regular
+  expressions were allowed; a pattern lets one entry match a heading whose exact
+  wording varies (or is not known yet) without hand-editing the recipe each
+  time. Matching is case-insensitive and against the *whole* heading
+  (``re.fullmatch``), for both source types -- a partial match would be too loose
+  to locate a heading by, since a title such as "Projekte" would then also match
+  "Weitere Projekte" or a passing mention of the word. A varying part of an
+  otherwise fixed heading is still reachable: a wildcard in the pattern stands in
+  for it, covering the whole line the same as literal text would. The span runs
   from ``begin`` up to but not including ``end``: ``end`` is the headline that
   starts the *next* thing, so it is not copied. Leave ``begin`` out and the span
   starts at the top of the file; leave ``end`` out and it runs to the bottom.
-  Both rules hold for both source types, so moving content between a ``.md`` and
-  a ``.docx`` does not change what an entry means.
+  Both rules hold for both source types, so moving content between a ``.md``
+  and a ``.docx`` does not change what an entry means.
 * **A span that starts at the top of a Markdown file brings the header with it.**
   Frontmatter is part of the beginning of the document, so the first such entry
-  is where the CV's name, headline, contact, photo and summary come from -- there
+  is where the Document's name, headline, contact, photo and summary come from -- there
   is no separate key naming a metadata file, because that would be a second way
   to say the same thing. An entry that wants the header and none of the file's
-  sections ends at its first heading.
+  sections ends at its first heading. **No entry has to be Markdown at all** --
+  a recipe built purely from ``.docx``/``.xlsx`` (an invoice, say) gets a bare
+  header instead: no name, headline, contact or summary. Its photo, if it wants
+  one, comes from the root-level ``photo`` key (see :class:`BuildConfig`)
+  instead of frontmatter, which such a recipe has none of.
 * **A span may cover several headlines.** A Markdown span is split at its ``##``
-  headings the way a single-file CV is, so one entry can contribute several
+  headings the way a single-file Document is, so one entry can contribute several
   sections; a ``.docx`` or ``.xlsx`` span is one section, since neither imported
   blocks nor a cell rectangle carry headings of their own. That is what lets
   three entries describe a five-section document.
@@ -53,13 +67,17 @@ Five rules decide what a span *is*:
 files it names travel together. It may be a glob -- ``*Projektliste*.docx``
 matches a list whose name carries a date, which a literal name would not survive
 -- and then has to match exactly one file: picking one of several would quietly
-publish a CV built from last year's list.
+publish a Document built from last year's list.
 
 A plain (non-glob) ``source`` that is not found beside the config is also tried
 relative to the project root, so a section may point at a file kept at the top
 of the project (``data/document.md``) instead of beside the recipe that names
 it. The config's own directory is tried first, so a file that exists in both
 places is not ambiguous.
+
+The results go to ``dist/<name>.<format>`` by default, ``<name>`` taken from
+the file the header came from. ``target`` overrides that whole path, relative
+to the project root and without an extension -- see :class:`BuildConfig`.
 """
 
 from __future__ import annotations
@@ -71,17 +89,17 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cv_generator.docx_import import LOCK_PREFIX
-from cv_generator.errors import CVParseError
+from cv_generator.errors import DocParseError
 
 CONFIG_SUFFIX = ".json"
 
 # What a section's `source` is read as. Distinct from the CLI's own --format,
 # which names an *output* (html/docx/pdf); this one names the reader a span is
-# parsed by, and is what dispatch in `parser.build_cv` switches on.
+# parsed by, and is what dispatch in `parser.build_doc` switches on.
 SourceFormat = Literal["md", "docx", "xlsx"]
 
 # Only these make a value a pattern. Everything else is a plain relative path, so
-# a file really named "cv (2).md" is not accidentally read as a glob.
+# a file really named "doc (2).md" is not accidentally read as a glob.
 _GLOB_CHARS = "*?["
 
 
@@ -95,15 +113,20 @@ class SectionSpec(BaseModel):
     # glob, and a guess would silently do the wrong thing for a file whose name
     # does not match its content.
     format: SourceFormat
-    # None means "from the top of the document" -- which, for Markdown, is where
-    # the frontmatter is, so such a span can also supply the CV's header.
+    # A regular expression, matched case-insensitively and in full against a
+    # heading (plain text matches itself exactly). None means "from the top of
+    # the document" -- which, for Markdown, is where the frontmatter is, so such
+    # a span can also supply the Document's header.
     begin: str | None = None
-    # None means "to the end of the document". Otherwise the headline where
-    # copying stops -- it belongs to what comes next and is not copied.
+    # Matched the same way as `begin`. None means "to the end of the document".
+    # Otherwise the heading where copying stops -- it belongs to what comes next
+    # and is not copied.
     end: str | None = None
-    # Renames the first section the span produces. The imported project list is
-    # headed "Projekthistorie" in Word and "Projekte" in the CV; without this the
-    # target would have to adopt the source document's wording.
+    # Renames the first section a `.docx`/`.xlsx` span produces (a Markdown span
+    # already has its own headings). Never required: an imported section falls
+    # back to `begin` (the heading it starts at), and failing that to the
+    # source file's own stem, so every entry is titled without needing this key
+    # -- `title` is for when the source's own wording or filename would not do.
     title: str | None = None
     # The rectangle an "xlsx" entry reads, Excel's own way: column letters and
     # 1-based row numbers, both ends inclusive. Hyphenated in the recipe because
@@ -146,33 +169,61 @@ class BuildConfig(BaseModel):
     # that of the file the header came from, which is what keeps a recipe built
     # around `document.md` producing `dist/document.*` with nothing said about it.
     output: str | None = None
+    # Where the build writes its results, as a path relative to the project root
+    # and with no extension -- `"exports/lebenslauf"` becomes
+    # `exports/lebenslauf.html`, `.docx`, `.pdf`. Unlike `output` this also picks
+    # the directory, not just the name, so a recipe that wants its results
+    # outside `dist/` names `target` instead of relying on `-o`/`--out` at the
+    # command line every time.
+    target: str | None = None
+    # A portrait image, resolved the same way a section's `source` is (the
+    # config's own directory, else the project root). Frontmatter's `photo:` key
+    # only exists on a Markdown source, so a recipe with none -- or one whose
+    # Markdown source has no `photo:` of its own -- names the file here instead.
+    # Wins over a Markdown-supplied photo when both are present, the same way
+    # `target` wins over the file the header came from.
+    photo: str | None = None
+
+    @model_validator(mode="after")
+    def _output_or_target_not_both(self) -> BuildConfig:
+        """`output` names the file; `target` names the file *and* where it goes.
+
+        Both answer "what are the results called", so giving both would be two
+        ways to say one thing -- and silently picking one would hide that the
+        other is ignored.
+        """
+        if self.output is not None and self.target is not None:
+            raise ValueError(
+                "a recipe takes 'output' or 'target', not both -- 'target' subsumes it"
+            )
+        return self
 
 
 def load_config(path: Path) -> BuildConfig:
     """Read and validate a ``config.json``.
 
     Raises:
-        CVParseError: if the file cannot be read, is not valid JSON, is not a
+        DocParseError: if the file cannot be read, is not valid JSON, is not a
             JSON object, or does not satisfy :class:`BuildConfig` -- including an
             unknown key, which is a typo rather than an extension.
     """
     try:
         text = path.read_text(encoding="utf-8-sig")
     except OSError as exc:
-        raise CVParseError(f"cannot read {path}: {exc}") from exc
+        raise DocParseError(f"cannot read {path}: {exc}") from exc
 
     try:
         raw: Any = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise CVParseError(f"{path}: invalid JSON: {exc}") from exc
+        raise DocParseError(f"{path}: invalid JSON: {exc}") from exc
 
     if not isinstance(raw, dict):
-        raise CVParseError(f"{path}: the config must be a JSON object, got {type(raw).__name__}")
+        raise DocParseError(f"{path}: the config must be a JSON object, got {type(raw).__name__}")
 
     try:
         return BuildConfig.model_validate(raw)
     except ValidationError as exc:
-        raise CVParseError(f"{path}: {exc}") from exc
+        raise DocParseError(f"{path}: {exc}") from exc
 
 
 def resolve_source(
@@ -195,18 +246,18 @@ def resolve_source(
     rebuild.
 
     Raises:
-        CVParseError: if the value is empty, names a file that is not there, or
+        DocParseError: if the value is empty, names a file that is not there, or
             is a pattern matching no file or several.
     """
     reference = reference.strip()
     if not reference:
-        raise CVParseError(f"{source}: a source must name a file, got an empty string")
+        raise DocParseError(f"{source}: a source must name a file, got an empty string")
 
     if not any(char in reference for char in _GLOB_CHARS):
         path = Path(reference)
         if path.is_absolute():
             if not path.is_file():
-                raise CVParseError(f"{source}: no such file: {path}")
+                raise DocParseError(f"{source}: no such file: {path}")
             return path
         candidate = base_dir / path
         if candidate.is_file():
@@ -215,7 +266,7 @@ def resolve_source(
             root_candidate = project_root / path
             if root_candidate.is_file():
                 return root_candidate
-        raise CVParseError(f"{source}: no such file: {candidate}")
+        raise DocParseError(f"{source}: no such file: {candidate}")
 
     matches = sorted(
         match
@@ -223,10 +274,10 @@ def resolve_source(
         if match.is_file() and not match.name.startswith(LOCK_PREFIX)
     )
     if not matches:
-        raise CVParseError(f"{source}: no file in {base_dir} matches {reference!r}")
+        raise DocParseError(f"{source}: no file in {base_dir} matches {reference!r}")
     if len(matches) > 1:
         names = ", ".join(match.name for match in matches)
-        raise CVParseError(
+        raise DocParseError(
             f"{source}: {len(matches)} files in {base_dir} match {reference!r} "
             f"({names}); keep exactly one"
         )

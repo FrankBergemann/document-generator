@@ -10,7 +10,7 @@ import pytest
 from pypdf import PdfReader
 
 from cv_generator.errors import PdfEngineError
-from cv_generator.models import CV
+from cv_generator.models import Document
 from cv_generator.pdf import (
     KNOWN_ENGINES,
     ChromeEngine,
@@ -199,10 +199,10 @@ class TestRemoteBrowser:
         assert server_listening("stdio://127.0.0.1") is False
 
     def test_an_unreachable_server_is_reported_with_its_address(
-        self, tmp_path: Path, closed_port: int, minimal_cv: CV
+        self, tmp_path: Path, closed_port: int, minimal_document: Document
     ) -> None:
         endpoint = f"ws://127.0.0.1:{closed_port}/"
-        html = Renderer().render_html(minimal_cv)
+        html = Renderer().render_html(minimal_document)
         engine = ChromeEngine(ws_endpoint=endpoint, timeout_ms=5_000)
         with pytest.raises(PdfEngineError) as excinfo:
             engine.render(html, tmp_path / "document.pdf")
@@ -214,10 +214,10 @@ class TestRemoteBrowser:
 class TestMissingBrowser:
     @pytest.mark.skipif(CHROME_AVAILABLE or LOCAL_CHROME_INSTALLED, reason="a browser is available")
     def test_render_explains_the_install(
-        self, tmp_path: Path, minimal_cv: CV, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, minimal_document: Document, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv(BROWSER_WS_ENV, raising=False)
-        html = Renderer().render_html(minimal_cv)
+        html = Renderer().render_html(minimal_document)
         with pytest.raises(PdfEngineError) as excinfo:
             ChromeEngine().render(html, tmp_path / "document.pdf")
         message = str(excinfo.value)
@@ -228,8 +228,8 @@ class TestMissingBrowser:
 @requires_chromium
 class TestChromePrinting:
     @pytest.fixture
-    def pdf(self, tmp_path: Path, minimal_cv: CV) -> Path:
-        html = Renderer().render_html(minimal_cv)
+    def pdf(self, tmp_path: Path, minimal_document: Document) -> Path:
+        html = Renderer().render_html(minimal_document)
         output = tmp_path / "out" / "document.pdf"
         ChromeEngine().render(html, output)
         return output
@@ -257,11 +257,11 @@ class TestChromePrinting:
     def test_reported_as_available(self) -> None:
         assert "chrome" in available_engines()
 
-    def test_a_photo_reaches_the_pdf(self, tmp_path: Path, photo_cv: CV) -> None:
+    def test_a_photo_reaches_the_pdf(self, tmp_path: Path, photo_document: Document) -> None:
         # The proof that a data URL survives the round trip to the browser: with
-        # a file reference the container would print a CV with a hole in it.
+        # a file reference the container would print a Document with a hole in it.
         output = tmp_path / "photo.pdf"
-        ChromeEngine().render(Renderer().render_html(photo_cv), output)
+        ChromeEngine().render(Renderer().render_html(photo_document), output)
         reader = PdfReader(str(output))
         assert len(reader.pages) == 1
         assert reader.pages[0].images

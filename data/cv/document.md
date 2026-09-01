@@ -3,7 +3,7 @@ name: Frank Bergemann
 headline: Senior Software Engineer
 lang: de
 theme: classic
-photo: photo.jpg
+photo: ../general/photo.jpg
 contact:
   email: frank.bergemann@gmx.de
   location: Deutschland

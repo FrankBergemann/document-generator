@@ -1,10 +1,10 @@
-"""Generate a CV from Markdown and Word sources, as HTML, PDF or MS Word."""
+"""Generate a Document from Markdown and Word sources, as HTML, PDF or MS Word."""
 
 from cv_generator.config import BuildConfig, SectionSpec, load_config
-from cv_generator.errors import CVError, CVParseError, PdfEngineError, RenderError
+from cv_generator.errors import DocError, DocParseError, PdfEngineError, RenderError
 from cv_generator.models import (
-    CV,
     Contact,
+    Document,
     Link,
     Photo,
     RichCell,
@@ -13,18 +13,18 @@ from cv_generator.models import (
     RichTable,
     Section,
 )
-from cv_generator.parser import build_cv, load_cv, parse_config_file, parse_cv, parse_cv_file
+from cv_generator.parser import build_doc, load_doc, parse_config_file, parse_doc, parse_doc_file
 from cv_generator.render import Renderer
 from cv_generator.word import WordRenderer, WordTheme
 
 __version__ = "0.2.0"
 
 __all__ = [
-    "CV",
     "BuildConfig",
-    "CVError",
-    "CVParseError",
     "Contact",
+    "DocError",
+    "DocParseError",
+    "Document",
     "Link",
     "PdfEngineError",
     "Photo",
@@ -39,10 +39,10 @@ __all__ = [
     "WordRenderer",
     "WordTheme",
     "__version__",
-    "build_cv",
+    "build_doc",
     "load_config",
-    "load_cv",
+    "load_doc",
     "parse_config_file",
-    "parse_cv",
-    "parse_cv_file",
+    "parse_doc",
+    "parse_doc_file",
 ]

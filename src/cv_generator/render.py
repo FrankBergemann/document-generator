@@ -1,4 +1,4 @@
-"""Render a :class:`~cv_generator.models.CV` to a self-contained HTML document.
+"""Render a :class:`~cv_generator.models.Document` to a self-contained HTML document.
 
 This is also the input stage for PDF output: :mod:`cv_generator.pdf` prints the
 HTML produced here in headless Chromium.
@@ -19,7 +19,7 @@ from markupsafe import Markup, escape
 
 from cv_generator.errors import RenderError
 from cv_generator.markdown import to_html
-from cv_generator.models import CV, RichBlock, RichParagraph, RichRun, RichTable
+from cv_generator.models import Document, RichBlock, RichParagraph, RichRun, RichTable
 
 BUILTIN_TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -28,14 +28,14 @@ STYLESHEET_NAME = "document.css"
 
 
 class Renderer:
-    """Turns a CV into HTML using a theme directory.
+    """Turns a Document into HTML using a theme directory.
 
     A theme is a directory containing ``document.html.j2`` and ``document.css``. The
     stylesheet is inlined into the output so that a single HTML file is enough
     for any downstream PDF engine.
 
     Autoescape is on. Trusted markup -- the stylesheet and the HTML converted
-    from the CV's Markdown -- is wrapped in :class:`Markup` here rather than
+    from the Document's Markdown -- is wrapped in :class:`Markup` here rather than
     marked ``| safe`` in the template, so a theme author cannot accidentally
     escape CSS (which would turn child selectors ``>`` into ``&gt;``) or
     double-escape rendered Markdown.
@@ -62,9 +62,9 @@ class Renderer:
             if entry.is_dir() and (entry / TEMPLATE_NAME).is_file()
         )
 
-    def render_html(self, cv: CV, theme: str | None = None) -> str:
-        """Render ``cv`` to a complete HTML document."""
-        name = theme or cv.theme
+    def render_html(self, doc: Document, theme: str | None = None) -> str:
+        """Render ``doc`` to a complete HTML document."""
+        name = theme or doc.theme
         try:
             template = self._env.get_template(f"{name}/{TEMPLATE_NAME}")
         except TemplateNotFound as exc:
@@ -73,7 +73,7 @@ class Renderer:
                 f"theme {name!r} not found in {self.templates_dir} (available: {known})"
             ) from exc
 
-        return template.render(document=cv, stylesheet=self._stylesheet(name))
+        return template.render(document=doc, stylesheet=self._stylesheet(name))
 
     def _stylesheet(self, theme: str) -> Markup:
         path = self.templates_dir / theme / STYLESHEET_NAME

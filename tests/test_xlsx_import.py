@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cv_generator.errors import CVParseError
+from cv_generator.errors import DocParseError
 from cv_generator.models import RichTable
 from cv_generator.xlsx_import import load_section
 from tests.support import (
@@ -64,29 +64,29 @@ class TestRectangle:
         assert len(blocks[0].rows[0]) == 5
 
     def test_col_start_after_col_end_is_an_error(self, workbook: Path) -> None:
-        with pytest.raises(CVParseError, match="'col-start' 'G' comes after 'col-end' 'C'"):
+        with pytest.raises(DocParseError, match="'col-start' 'G' comes after 'col-end' 'C'"):
             load_section(workbook, col_start="G", col_end="C", row_start=3, row_end=3)
 
     def test_row_start_after_row_end_is_an_error(self, workbook: Path) -> None:
-        with pytest.raises(CVParseError, match="'row-start' 5 comes after 'row-end' 3"):
+        with pytest.raises(DocParseError, match="'row-start' 5 comes after 'row-end' 3"):
             load_section(workbook, col_start="C", col_end="G", row_start=5, row_end=3)
 
     def test_row_start_below_one_is_an_error(self, workbook: Path) -> None:
-        with pytest.raises(CVParseError, match="'row-start' must be at least 1"):
+        with pytest.raises(DocParseError, match="'row-start' must be at least 1"):
             load_section(workbook, col_start="C", col_end="G", row_start=0, row_end=3)
 
     def test_not_a_column_letter_is_an_error(self, workbook: Path) -> None:
-        with pytest.raises(CVParseError, match="not a column letter"):
+        with pytest.raises(DocParseError, match="not a column letter"):
             load_section(workbook, col_start="1", col_end="G", row_start=3, row_end=3)
 
     def test_a_missing_file_is_an_error(self, tmp_path: Path) -> None:
-        with pytest.raises(CVParseError, match="cannot read"):
+        with pytest.raises(DocParseError, match="cannot read"):
             load_section(tmp_path / "gone.xlsx", col_start="C", col_end="G", row_start=3, row_end=3)
 
     def test_a_file_that_is_not_an_excel_workbook(self, tmp_path: Path) -> None:
         path = tmp_path / "Rechnung.xlsx"
         path.write_text("just text", encoding="utf-8")
-        with pytest.raises(CVParseError, match="as an Excel workbook"):
+        with pytest.raises(DocParseError, match="as an Excel workbook"):
             load_section(path, col_start="C", col_end="G", row_start=3, row_end=3)
 
 
