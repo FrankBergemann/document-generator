@@ -25,16 +25,19 @@ heading starts a section. Section bodies are kept as Markdown -- converting them
 is the job of an output backend, not of the parser.
 
 **A ``config.json``**, when the document is assembled from several files: any
-number of spans copied out of ``.md`` and ``.docx`` sources, each bounded by the
-headlines it begins and ends at. The header rides along with the first span that
-starts at the top of a Markdown file, since frontmatter is part of that
-beginning. See :mod:`cv_generator.config` for the recipe's shape and
-:mod:`cv_generator.docx_import` for how a Word section is read. Either way the
+number of spans copied out of ``.md``, ``.docx`` and ``.xlsx`` sources -- a
+Markdown or Word span bounded by the headlines it begins and ends at, an Excel
+one by the cell rectangle it names. The header rides along with the first span
+that starts at the top of a Markdown file, since frontmatter is part of that
+beginning. See :mod:`cv_generator.config` for the recipe's shape,
+:mod:`cv_generator.docx_import` for how a Word section is read and
+:mod:`cv_generator.xlsx_import` for how a cell rectangle is. Either way the
 backends see one finished model and never learn how many files went into it.
 
 Referenced files are read *here* rather than by the backends, so a model is
 complete on its own: ``photo`` is resolved relative to the Markdown file that
-names it and carried as bytes, and an imported Word section arrives as blocks.
+names it and carried as bytes, and an imported Word or Excel section arrives as
+blocks.
 """
 
 from __future__ import annotations
@@ -50,16 +53,15 @@ from pydantic import ValidationError
 
 from cv_generator.config import (
     CONFIG_SUFFIX,
-    SOURCE_SUFFIXES,
     BuildConfig,
     SectionSpec,
-    check_suffix,
     load_config,
     resolve_source,
 )
-from cv_generator.docx_import import DOCX_SUFFIX, load_section
+from cv_generator.docx_import import load_section as load_docx_section
 from cv_generator.errors import CVParseError
 from cv_generator.models import CV, Photo, Section
+from cv_generator.xlsx_import import load_section as load_xlsx_section
 
 FRONTMATTER_DELIM = "---"
 
@@ -240,7 +242,13 @@ class _Header:
     name: str
 
 
-def build_cv(config: BuildConfig, base_dir: Path, *, source: str = "<config>") -> LoadedCV:
+def build_cv(
+    config: BuildConfig,
+    base_dir: Path,
+    *,
+    source: str = "<config>",
+    project_root: Path | None = None,
+) -> LoadedCV:
     """Assemble a :class:`CV` from the files a :class:`BuildConfig` names.
 
     The header is not named by a key of its own: it comes from the first entry
@@ -252,15 +260,18 @@ def build_cv(config: BuildConfig, base_dir: Path, *, source: str = "<config>") -
     Args:
         base_dir: Directory every ``source`` is resolved against -- the config
             file's own, so a recipe and its ingredients travel together.
+        project_root: Fallback directory for a ``source`` not found beside the
+            config -- see :func:`cv_generator.config.resolve_source`.
 
     Returns:
         The finished CV and the stem its outputs default to.
 
     Raises:
-        CVParseError: if a named file is missing, ambiguous, of an unreadable
-            format, or does not contain the headlines an entry asks for; or if no
-            entry starts at the top of a Markdown file, so the CV has no header.
-            Every message names the entry it came from, since a recipe has many.
+        CVParseError: if a named file is missing, ambiguous, of a format its
+            declared rectangle or headlines do not match, or does not contain
+            what an entry asks for; or if no entry starts at the top of a
+            Markdown file, so the CV has no header. Every message names the
+            entry it came from, since a recipe has many.
     """
     slug_for = _Slugger()
     sections: list[Section] = []
@@ -268,10 +279,13 @@ def build_cv(config: BuildConfig, base_dir: Path, *, source: str = "<config>") -
 
     for index, spec in enumerate(config.sections):
         where = f"{source}: sections[{index}]"
-        path = resolve_source(base_dir, spec.source, source=where)
+        path = resolve_source(base_dir, spec.source, source=where, project_root=project_root)
 
-        if check_suffix(path, SOURCE_SUFFIXES, source=where) == DOCX_SUFFIX:
+        if spec.format == "docx":
             sections.append(_copy_docx(spec, path, slug_for, source=where))
+            continue
+        if spec.format == "xlsx":
+            sections.append(_copy_xlsx(spec, path, slug_for, source=where))
             continue
 
         text = _read(path)
@@ -294,7 +308,7 @@ def build_cv(config: BuildConfig, base_dir: Path, *, source: str = "<config>") -
 
 def parse_config_file(path: Path) -> CV:
     """Read a ``config.json`` and assemble the document it describes."""
-    return build_cv(load_config(path), path.parent, source=str(path)).cv
+    return build_cv(load_config(path), path.parent, source=str(path), project_root=Path.cwd()).cv
 
 
 def load_cv(path: Path) -> LoadedCV:
@@ -303,7 +317,7 @@ def load_cv(path: Path) -> LoadedCV:
     The suffix decides, so one argument covers both and neither needs a flag.
     """
     if path.suffix.lower() == CONFIG_SUFFIX:
-        return build_cv(load_config(path), path.parent, source=str(path))
+        return build_cv(load_config(path), path.parent, source=str(path), project_root=Path.cwd())
     return LoadedCV(parse_cv_file(path), path.stem)
 
 
@@ -344,7 +358,7 @@ def _copy_docx(spec: SectionSpec, path: Path, slug_for: _Slugger, *, source: str
         )
 
     try:
-        blocks = load_section(path, spec.begin, spec.end)
+        blocks = load_docx_section(path, spec.begin, spec.end)
     except CVParseError as exc:
         raise CVParseError(f"{source}: {exc}") from exc
 
@@ -353,6 +367,47 @@ def _copy_docx(spec: SectionSpec, path: Path, slug_for: _Slugger, *, source: str
         slug=slug_for(title),
         # Empty on purpose: the content is `blocks`, and no backend may be given
         # the chance to render two sources for one section.
+        markdown="",
+        blocks=blocks,
+        source=str(path),
+    )
+
+
+def _copy_xlsx(spec: SectionSpec, path: Path, slug_for: _Slugger, *, source: str) -> Section:
+    """One section, from the rectangle of cells ``spec`` names.
+
+    Always one and never several, for the same reason as a ``.docx`` import: a
+    cell rectangle has no headings to split it at. Unlike a ``.docx`` entry,
+    there is no ``begin`` headline to fall back on either, so ``title`` is
+    required outright rather than only when ``begin`` is absent.
+    """
+    if spec.title is None:
+        raise CVParseError(
+            f"{source}: an entry importing a cell range from {path.name} needs a 'title', "
+            f"since row and column bounds carry no heading to name the section after"
+        )
+
+    # `SectionSpec._rectangle_matches_format` guarantees all four are set
+    # together with format "xlsx".
+    assert spec.col_start is not None
+    assert spec.col_end is not None
+    assert spec.row_start is not None
+    assert spec.row_end is not None
+
+    try:
+        blocks = load_xlsx_section(
+            path,
+            col_start=spec.col_start,
+            col_end=spec.col_end,
+            row_start=spec.row_start,
+            row_end=spec.row_end,
+        )
+    except CVParseError as exc:
+        raise CVParseError(f"{source}: {exc}") from exc
+
+    return Section(
+        title=spec.title,
+        slug=slug_for(spec.title),
         markdown="",
         blocks=blocks,
         source=str(path),

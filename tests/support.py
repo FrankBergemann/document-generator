@@ -17,6 +17,7 @@ importer is expected to read back.
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,8 @@ from docx.oxml.ns import qn
 from docx.shared import Mm, Pt
 from docx.table import _Cell
 from docx.text.paragraph import Paragraph
+from openpyxl import Workbook
+from openpyxl.styles import Border, Font, Side
 
 from cv_generator.pdf.chrome import ChromeEngine, local_browser_installed
 
@@ -238,3 +241,56 @@ def _link(paragraph: Paragraph, text: str, url: str) -> Paragraph:
 
 def cell_text(cell: _Cell) -> str:
     return "\n".join(paragraph.text for paragraph in cell.paragraphs)
+
+
+# -- the Excel rectangle ----------------------------------------------------
+
+WORKBOOK_HEADERS = ("Datum", "Dauer [h]", "Stundensatz", "Leistung", "Preis")
+WORKBOOK_CURRENCY_FORMAT = '#,##0.00\\ "€"'
+
+# Placed outside the C3:G5 rectangle every test asks for -- one above it, one
+# beside it -- so a test can assert the importer respects the corners it was
+# given rather than picking up whatever is nearby.
+BEFORE_RECTANGLE = "Nicht Teil des Rechtecks"
+AFTER_RECTANGLE = "Auch nicht Teil des Rechtecks"
+
+
+def write_workbook(path: Path) -> Path:
+    """Write a small Excel workbook of the shape :mod:`xlsx_import` reads.
+
+    Built rather than committed, for the reason :func:`write_projektliste`
+    already is: a ``.xlsx`` in ``tests/data`` would be an opaque blob nobody can
+    review or amend. The rectangle a test asks for is ``C3:G5`` -- a bold, ruled
+    header row and one data row exercising a date, a plain number and a
+    currency-formatted one.
+    """
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Rechnung"
+
+    sheet["B1"] = BEFORE_RECTANGLE
+    sheet["H3"] = AFTER_RECTANGLE
+
+    header_font = Font(bold=True, size=14)
+    ruled = Border(bottom=Side(style="thin"))
+    for column, heading in zip("CDEFG", WORKBOOK_HEADERS, strict=True):
+        cell = sheet[f"{column}3"]
+        cell.value = heading
+        cell.font = header_font
+        cell.border = ruled
+
+    # Row 4 is left blank, the way a real invoice sheet spaces its header from
+    # its data -- and a case for "an empty cell is an empty paragraph".
+    sheet["C5"] = datetime.date(2026, 8, 21)
+    sheet["D5"] = 8.5
+    sheet["E5"] = 150
+    sheet["E5"].number_format = WORKBOOK_CURRENCY_FORMAT
+    sheet["F5"] = "Testmanagement"
+    sheet["G5"] = 1275
+    sheet["G5"].number_format = WORKBOOK_CURRENCY_FORMAT
+
+    for column, width in zip("CDEFG", (14.0, 11.5, 21.5, 41.0, 13.0), strict=True):
+        sheet.column_dimensions[column].width = width
+
+    workbook.save(str(path))
+    return path

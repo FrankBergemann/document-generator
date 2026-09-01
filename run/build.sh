@@ -7,6 +7,7 @@
 #   run/build.sh -f docx                       # -> dist/document.docx
 #   run/build.sh -f html -f docx               # a subset; -f is repeatable
 #   run/build.sh other/config.json             # a different recipe
+#   run/build.sh --config other/config.json    # the same, as a named flag
 #   run/build.sh notes/talk.md -o out.pdf -f pdf   # a single .md, no recipe
 #   run/build.sh -t classic                    # theme (HTML/PDF only)
 #

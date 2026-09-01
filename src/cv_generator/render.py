@@ -147,9 +147,18 @@ def _list(items: Sequence[RichParagraph], level: int = 0) -> str:
 
 
 def _table(table: RichTable) -> str:
-    classes = "cv-block-table" + (" cv-block-table--ruled" if table.bordered else "")
+    classes = "cv-block-table"
+    if table.bordered:
+        classes += " cv-block-table--ruled"
+    if table.centered:
+        classes += " cv-block-table--centered"
     parts = [f'<table class="{classes}">']
-    if len(table.column_widths) == max((len(row) for row in table.rows), default=0):
+    # A centered table is sized to its own content instead of the page, so the
+    # source's column *proportions* would misdescribe it -- the browser's own
+    # content-based sizing decides column widths instead.
+    if not table.centered and len(table.column_widths) == max(
+        (len(row) for row in table.rows), default=0
+    ):
         columns = "".join(
             f'<col style="width:{width * 100:.4g}%">' for width in table.column_widths
         )

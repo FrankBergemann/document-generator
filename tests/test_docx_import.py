@@ -181,3 +181,8 @@ class TestTableGeometry:
     def test_a_ruled_table_says_so(self, blocks: list[RichBlock]) -> None:
         # `Table Grid` keeps its borders in the style, not on the table.
         assert all(table.bordered for table in tables(blocks))
+
+    def test_a_docx_table_is_not_centered(self, blocks: list[RichBlock]) -> None:
+        # Unlike an `.xlsx` range, a `.docx` table is meant to fill the page the
+        # way it did in the source document.
+        assert all(not table.centered for table in tables(blocks))

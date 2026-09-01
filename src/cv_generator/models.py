@@ -123,8 +123,14 @@ class RichTable(BaseModel):
     bordered: bool = False
     # Column widths as fractions of the table width, or empty if the source did
     # not fix them. Fractions rather than absolute widths: the CV's page may be
-    # narrower than the document the table came from.
+    # narrower than the document the table came from. Ignored when `centered`
+    # (see below) -- a table sized to fill the page has no room to be centered in.
     column_widths: list[float] = Field(default_factory=list)
+    # True for an imported Excel range, false for an imported Word section: a
+    # `.docx` table is meant to fill the page the way it did in the source
+    # document, while a spreadsheet range reads more like a figure dropped into
+    # the page, sized to its own content and set off from the surrounding text.
+    centered: bool = False
 
 
 # Discriminated on `kind`, so a round-trip through JSON cannot confuse the two.

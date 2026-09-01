@@ -504,7 +504,13 @@ class WordRenderer:
         table = document.add_table(rows=0, cols=columns)
         if block.bordered and "Table Grid" in _style_names(document):
             table.style = "Table Grid"
-        if len(block.column_widths) == columns:
+        if block.centered:
+            # Sized to its own content instead of stretched to the page -- the
+            # default a table gets when no column widths are set at all -- and
+            # centered between the margins, the way Word centers a table left
+            # otherwise sitting flush against the left margin.
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        elif len(block.column_widths) == columns:
             set_column_widths(
                 table, *(Mm(theme.content_width_mm * share) for share in block.column_widths)
             )

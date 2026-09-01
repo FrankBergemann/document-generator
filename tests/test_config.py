@@ -19,6 +19,7 @@ from tests.support import (
     PROJEKTLISTE_NAME,
     SAMPLE_PROJECTS,
     write_projektliste,
+    write_workbook,
 )
 
 # A Markdown source with four headings, so a span can start late, stop early, or
@@ -49,7 +50,7 @@ Wird von keinem Eintrag angefordert.
 # An entry that takes document.md's header and none of its sections, by ending at the
 # very first heading. Prepended by `recipe` so a test about spans can say only
 # what it is about; the header has to come from somewhere in every recipe.
-HEADER_ONLY: dict[str, Any] = {"source": "document.md", "end": "Berufserfahrung"}
+HEADER_ONLY: dict[str, Any] = {"source": "document.md", "format": "md", "end": "Berufserfahrung"}
 
 
 def recipe(*specs: dict[str, Any]) -> dict[str, Any]:
@@ -80,14 +81,20 @@ class TestLoadConfig:
         ]
 
     def test_begin_end_and_title_are_all_optional(self, tmp_path: Path) -> None:
-        config = load_config(write_config(tmp_path, {"sections": [{"source": "document.md"}]}))
+        config = load_config(
+            write_config(tmp_path, {"sections": [{"source": "document.md", "format": "md"}]})
+        )
         assert config.sections[0].begin is None
         assert config.sections[0].end is None
         assert config.sections[0].title is None
 
-    def test_source_is_the_one_required_key_of_an_entry(self, tmp_path: Path) -> None:
+    def test_source_and_format_are_the_required_keys_of_an_entry(self, tmp_path: Path) -> None:
         with pytest.raises(CVParseError, match="source"):
-            load_config(write_config(tmp_path, {"sections": [{"begin": "A"}]}))
+            load_config(write_config(tmp_path, {"sections": [{"format": "md", "begin": "A"}]}))
+
+    def test_format_is_required(self, tmp_path: Path) -> None:
+        with pytest.raises(CVParseError, match="format"):
+            load_config(write_config(tmp_path, {"sections": [{"source": "document.md"}]}))
 
     def test_rejects_an_unknown_key(self, tmp_path: Path) -> None:
         # A typo in a recipe must fail loudly, the way frontmatter does; silently
@@ -100,13 +107,14 @@ class TestLoadConfig:
         # It was replaced by an entry with no `begin`, and leaving both in would
         # be two ways to say where the header comes from.
         path = write_config(
-            tmp_path, {"metadata": "document.md", "sections": [{"source": "document.md"}]}
+            tmp_path,
+            {"metadata": "document.md", "sections": [{"source": "document.md", "format": "md"}]},
         )
         with pytest.raises(CVParseError, match="metadata"):
             load_config(path)
 
     def test_rejects_an_unknown_key_in_a_section(self, tmp_path: Path) -> None:
-        config = {"sections": [{"source": "document.md", "from": "A"}]}
+        config = {"sections": [{"source": "document.md", "format": "md", "from": "A"}]}
         with pytest.raises(CVParseError, match="from"):
             load_config(write_config(tmp_path, config))
 
@@ -131,7 +139,7 @@ class TestLoadConfig:
             load_config(tmp_path / "nope.json")
 
     def test_a_recipe_needs_nothing_but_sections(self) -> None:
-        config = BuildConfig(sections=[SectionSpec(source="document.md")])
+        config = BuildConfig(sections=[SectionSpec(source="document.md", format="md")])
         assert config.output is None
 
 
@@ -187,28 +195,73 @@ class TestResolveSource:
         with pytest.raises(CVParseError, match=r"sections\[2\]"):
             resolve_source(tmp_path, "gone.md", source="config.json: sections[2]")
 
+    def test_project_root_is_tried_when_base_dir_misses(self, tmp_path: Path) -> None:
+        base_dir = tmp_path / "recipe"
+        base_dir.mkdir()
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "document.md").write_text("x", encoding="utf-8")
+        found = resolve_source(base_dir, "document.md", project_root=root)
+        assert found == root / "document.md"
+
+    def test_base_dir_wins_over_project_root(self, tmp_path: Path) -> None:
+        base_dir = tmp_path / "recipe"
+        base_dir.mkdir()
+        (base_dir / "document.md").write_text("near", encoding="utf-8")
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "document.md").write_text("far", encoding="utf-8")
+        found = resolve_source(base_dir, "document.md", project_root=root)
+        assert found == base_dir / "document.md"
+
+    def test_missing_everywhere_still_names_the_base_dir_path(self, tmp_path: Path) -> None:
+        base_dir = tmp_path / "recipe"
+        base_dir.mkdir()
+        root = tmp_path / "root"
+        root.mkdir()
+        with pytest.raises(CVParseError, match="no such file"):
+            resolve_source(base_dir, "gone.md", project_root=root)
+
+    def test_project_root_fallback_does_not_apply_to_a_glob(self, tmp_path: Path) -> None:
+        base_dir = tmp_path / "recipe"
+        base_dir.mkdir()
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "Projektliste.docx").write_bytes(b"")
+        with pytest.raises(CVParseError, match="matches"):
+            resolve_source(base_dir, "*Projektliste*.docx", project_root=root)
+
 
 class TestMarkdownSpans:
     """`begin` and `end` pick a span out of a Markdown source."""
 
     def test_a_span_stops_before_its_end_headline(self, four_sections: Path) -> None:
         cv = spans(
-            four_sections, {"source": "document.md", "begin": "Berufserfahrung", "end": "Projekte"}
+            four_sections,
+            {
+                "source": "document.md",
+                "format": "md",
+                "begin": "Berufserfahrung",
+                "end": "Projekte",
+            },
         )
         assert [s.title for s in cv.sections] == ["Berufserfahrung"]
 
     def test_a_span_without_an_end_runs_to_the_end_of_the_file(self, four_sections: Path) -> None:
-        cv = spans(four_sections, {"source": "document.md", "begin": "Kenntnisse"})
+        cv = spans(four_sections, {"source": "document.md", "format": "md", "begin": "Kenntnisse"})
         assert [s.title for s in cv.sections] == ["Kenntnisse", "Sprachen"]
 
     def test_a_span_without_a_begin_starts_at_the_top_of_the_file(
         self, four_sections: Path
     ) -> None:
-        cv = build(four_sections, {"sections": [{"source": "document.md", "end": "Kenntnisse"}]})
+        cv = build(
+            four_sections,
+            {"sections": [{"source": "document.md", "format": "md", "end": "Kenntnisse"}]},
+        )
         assert [s.title for s in cv.sections] == ["Berufserfahrung", "Projekte"]
 
     def test_a_span_with_neither_is_the_whole_file(self, four_sections: Path) -> None:
-        cv = build(four_sections, {"sections": [{"source": "document.md"}]})
+        cv = build(four_sections, {"sections": [{"source": "document.md", "format": "md"}]})
         assert [s.title for s in cv.sections] == [
             "Berufserfahrung",
             "Projekte",
@@ -222,7 +275,8 @@ class TestMarkdownSpans:
         # The idiom that replaces the old `metadata` key: an entry that wants a
         # file's frontmatter but none of its content.
         cv = build(
-            four_sections, {"sections": [{"source": "document.md", "end": "Berufserfahrung"}]}
+            four_sections,
+            {"sections": [{"source": "document.md", "format": "md", "end": "Berufserfahrung"}]},
         )
         assert cv.name == "Ada Lovelace"
         assert cv.sections == []
@@ -230,76 +284,94 @@ class TestMarkdownSpans:
     def test_a_span_is_split_at_its_own_headings(self, four_sections: Path) -> None:
         # One entry, several sections: each keeps its own heading and anchor
         # rather than becoming body text of the first.
-        cv = spans(four_sections, {"source": "document.md", "begin": "Kenntnisse"})
+        cv = spans(four_sections, {"source": "document.md", "format": "md", "begin": "Kenntnisse"})
         assert [s.slug for s in cv.sections] == ["kenntnisse", "sprachen"]
         assert "## Sprachen" not in (cv.sections[0].markdown)
 
     def test_content_no_entry_asks_for_is_left_out(self, four_sections: Path) -> None:
         cv = spans(
             four_sections,
-            {"source": "document.md", "begin": "Berufserfahrung", "end": "Projekte"},
-            {"source": "document.md", "begin": "Kenntnisse"},
+            {
+                "source": "document.md",
+                "format": "md",
+                "begin": "Berufserfahrung",
+                "end": "Projekte",
+            },
+            {"source": "document.md", "format": "md", "begin": "Kenntnisse"},
         )
         assert all("keinem Eintrag" not in section.markdown for section in cv.sections)
 
     def test_the_same_file_may_be_used_more_than_once(self, four_sections: Path) -> None:
         cv = spans(
             four_sections,
-            {"source": "document.md", "begin": "Sprachen"},
-            {"source": "document.md", "begin": "Berufserfahrung", "end": "Projekte"},
+            {"source": "document.md", "format": "md", "begin": "Sprachen"},
+            {
+                "source": "document.md",
+                "format": "md",
+                "begin": "Berufserfahrung",
+                "end": "Projekte",
+            },
         )
         assert [s.title for s in cv.sections] == ["Sprachen", "Berufserfahrung"]
 
     def test_a_headline_may_be_written_with_its_hashes(self, four_sections: Path) -> None:
-        cv = spans(four_sections, {"source": "document.md", "begin": "## Sprachen"})
+        cv = spans(four_sections, {"source": "document.md", "format": "md", "begin": "## Sprachen"})
         assert [s.title for s in cv.sections] == ["Sprachen"]
 
     def test_matching_ignores_case(self, four_sections: Path) -> None:
-        cv = spans(four_sections, {"source": "document.md", "begin": "sprachen"})
+        cv = spans(four_sections, {"source": "document.md", "format": "md", "begin": "sprachen"})
         assert [s.title for s in cv.sections] == ["Sprachen"]
 
     def test_the_section_keeps_the_source_heading_s_own_wording(self, four_sections: Path) -> None:
-        cv = spans(four_sections, {"source": "document.md", "begin": "sprachen"})
+        cv = spans(four_sections, {"source": "document.md", "format": "md", "begin": "sprachen"})
         assert cv.sections[0].title == "Sprachen"
 
     def test_title_renames_the_first_section_of_a_span(self, four_sections: Path) -> None:
         cv = spans(
-            four_sections, {"source": "document.md", "begin": "Kenntnisse", "title": "Skills"}
+            four_sections,
+            {"source": "document.md", "format": "md", "begin": "Kenntnisse", "title": "Skills"},
         )
         assert [s.title for s in cv.sections] == ["Skills", "Sprachen"]
         assert cv.sections[0].slug == "skills"
 
     def test_a_missing_begin_headline_lists_the_ones_there_are(self, four_sections: Path) -> None:
         with pytest.raises(CVParseError, match="no '## Hobbys' heading; it has 'Berufserfahrung'"):
-            spans(four_sections, {"source": "document.md", "begin": "Hobbys"})
+            spans(four_sections, {"source": "document.md", "format": "md", "begin": "Hobbys"})
 
     def test_an_end_headline_that_never_comes_is_an_error(self, four_sections: Path) -> None:
         # Not "run to the end of the file": the entry said where to stop, and
         # importing the rest would put another section's content in this one.
         with pytest.raises(CVParseError, match="no '## Hobbys' heading after '## Kenntnisse'"):
-            spans(four_sections, {"source": "document.md", "begin": "Kenntnisse", "end": "Hobbys"})
+            spans(
+                four_sections,
+                {"source": "document.md", "format": "md", "begin": "Kenntnisse", "end": "Hobbys"},
+            )
 
     def test_an_end_headline_before_begin_does_not_count(self, four_sections: Path) -> None:
         with pytest.raises(CVParseError, match="no '## Projekte' heading after"):
             spans(
-                four_sections, {"source": "document.md", "begin": "Kenntnisse", "end": "Projekte"}
+                four_sections,
+                {"source": "document.md", "format": "md", "begin": "Kenntnisse", "end": "Projekte"},
             )
 
     def test_a_missing_end_names_the_top_of_the_file_when_there_is_no_begin(
         self, four_sections: Path
     ) -> None:
         with pytest.raises(CVParseError, match="no '## Hobbys' heading after the top of the file"):
-            build(four_sections, {"sections": [{"source": "document.md", "end": "Hobbys"}]})
+            build(
+                four_sections,
+                {"sections": [{"source": "document.md", "format": "md", "end": "Hobbys"}]},
+            )
 
     def test_a_source_needs_no_frontmatter_of_its_own(self, tmp_path: Path) -> None:
         # Only the file supplying the header is a CV; anything else is Markdown.
         (tmp_path / "document.md").write_text(FOUR_SECTIONS, encoding="utf-8")
         (tmp_path / "extra.md").write_text("## Hobbys\n\n- Segeln\n", encoding="utf-8")
-        cv = spans(tmp_path, {"source": "extra.md", "begin": "Hobbys"})
+        cv = spans(tmp_path, {"source": "extra.md", "format": "md", "begin": "Hobbys"})
         assert cv.sections[0].markdown == "- Segeln"
 
     def test_the_file_each_section_came_from_is_recorded(self, four_sections: Path) -> None:
-        cv = spans(four_sections, {"source": "document.md", "begin": "Sprachen"})
+        cv = spans(four_sections, {"source": "document.md", "format": "md", "begin": "Sprachen"})
         assert cv.sections[0].source == str(four_sections / "document.md")
 
     def test_duplicate_titles_from_two_files_get_distinct_slugs(self, tmp_path: Path) -> None:
@@ -308,8 +380,8 @@ class TestMarkdownSpans:
         (tmp_path / "other.md").write_text("## Kenntnisse\n\n- Rust\n", encoding="utf-8")
         cv = spans(
             tmp_path,
-            {"source": "document.md", "begin": "Kenntnisse", "end": "Sprachen"},
-            {"source": "other.md", "begin": "Kenntnisse"},
+            {"source": "document.md", "format": "md", "begin": "Kenntnisse", "end": "Sprachen"},
+            {"source": "other.md", "format": "md", "begin": "Kenntnisse"},
         )
         assert [s.slug for s in cv.sections] == ["kenntnisse", "kenntnisse-2"]
 
@@ -344,7 +416,12 @@ class TestWordSpans:
     def test_without_a_title_the_begin_headline_is_used(self, projects_dir: Path) -> None:
         cv = spans(
             projects_dir,
-            {"source": PROJEKTLISTE_NAME, "begin": "Projekthistorie", "end": "Ausbildung"},
+            {
+                "source": PROJEKTLISTE_NAME,
+                "format": "docx",
+                "begin": "Projekthistorie",
+                "end": "Ausbildung",
+            },
         )
         assert [s.title for s in cv.sections] == ["Projekthistorie"]
 
@@ -353,14 +430,22 @@ class TestWordSpans:
         # must not be dragged in with the projects.
         cv = spans(
             projects_dir,
-            {"source": PROJEKTLISTE_NAME, "begin": "Projekthistorie", "end": "Ausbildung"},
+            {
+                "source": PROJEKTLISTE_NAME,
+                "format": "docx",
+                "begin": "Projekthistorie",
+                "end": "Ausbildung",
+            },
         )
         assert "Promotion Maschinenbau" not in json.dumps(cv.sections[0].model_dump(mode="json"))
 
     def test_omitting_the_end_falls_back_to_the_formatting_rule(self, projects_dir: Path) -> None:
         # A hand-made Word CV has no heading styles, so the import stops at the
         # next paragraph shaped like the heading it started from.
-        cv = spans(projects_dir, {"source": PROJEKTLISTE_NAME, "begin": "Projekthistorie"})
+        cv = spans(
+            projects_dir,
+            {"source": PROJEKTLISTE_NAME, "format": "docx", "begin": "Projekthistorie"},
+        )
         assert [type(block) for block in cv.sections[0].blocks] == [RichTable] * len(
             SAMPLE_PROJECTS
         )
@@ -368,14 +453,20 @@ class TestWordSpans:
     def test_omitting_the_begin_starts_at_the_top_of_the_document(self, projects_dir: Path) -> None:
         # No heading to start from means no shape to guess an end from either, so
         # this is the whole document -- including the section before the projects.
-        cv = spans(projects_dir, {"source": PROJEKTLISTE_NAME, "title": "Alles"})
+        cv = spans(projects_dir, {"source": PROJEKTLISTE_NAME, "format": "docx", "title": "Alles"})
         texts = json.dumps(cv.sections[0].model_dump(mode="json"))
         assert BEFORE_HEADING in texts
         assert AFTER_SECTION in texts
 
     def test_omitting_the_begin_still_honours_an_end(self, projects_dir: Path) -> None:
         cv = spans(
-            projects_dir, {"source": PROJEKTLISTE_NAME, "end": "Projekthistorie", "title": "Vorab"}
+            projects_dir,
+            {
+                "source": PROJEKTLISTE_NAME,
+                "format": "docx",
+                "end": "Projekthistorie",
+                "title": "Vorab",
+            },
         )
         texts = json.dumps(cv.sections[0].model_dump(mode="json"))
         assert BEFORE_HEADING in texts
@@ -385,17 +476,28 @@ class TestWordSpans:
         # There is no headline to name the section after, and an untitled section
         # would render as an empty heading.
         with pytest.raises(CVParseError, match="needs a 'title'"):
-            spans(projects_dir, {"source": PROJEKTLISTE_NAME, "end": "Projekthistorie"})
+            spans(
+                projects_dir,
+                {"source": PROJEKTLISTE_NAME, "format": "docx", "end": "Projekthistorie"},
+            )
 
     def test_a_missing_begin_headline_is_an_error(self, projects_dir: Path) -> None:
         with pytest.raises(CVParseError, match="no heading 'Publikationen' found"):
-            spans(projects_dir, {"source": PROJEKTLISTE_NAME, "begin": "Publikationen"})
+            spans(
+                projects_dir,
+                {"source": PROJEKTLISTE_NAME, "format": "docx", "begin": "Publikationen"},
+            )
 
     def test_an_end_headline_that_never_comes_is_an_error(self, projects_dir: Path) -> None:
         with pytest.raises(CVParseError, match="no heading 'Publikationen' follows"):
             spans(
                 projects_dir,
-                {"source": PROJEKTLISTE_NAME, "begin": "Projekthistorie", "end": "Publikationen"},
+                {
+                    "source": PROJEKTLISTE_NAME,
+                    "format": "docx",
+                    "begin": "Projekthistorie",
+                    "end": "Publikationen",
+                },
             )
 
     def test_a_missing_project_list_is_an_error_naming_the_entry(self, tmp_path: Path) -> None:
@@ -403,8 +505,8 @@ class TestWordSpans:
         (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
         config = {
             "sections": [
-                {"source": "document.md", "end": "Projekte"},
-                {"source": "*Projektliste*.docx", "begin": "Projekthistorie"},
+                {"source": "document.md", "format": "md", "end": "Projekte"},
+                {"source": "*Projektliste*.docx", "format": "docx", "begin": "Projekthistorie"},
             ],
         }
         with pytest.raises(CVParseError, match=r"sections\[1\]: no file in .* matches"):
@@ -416,11 +518,84 @@ class TestWordSpans:
         (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
         config = {
             "sections": [
-                {"source": "document.md", "end": "Projekte"},
-                {"source": "*Projektliste*.docx", "begin": "Projekthistorie"},
+                {"source": "document.md", "format": "md", "end": "Projekte"},
+                {"source": "*Projektliste*.docx", "format": "docx", "begin": "Projekthistorie"},
             ],
         }
         with pytest.raises(CVParseError, match="keep exactly one"):
+            build(tmp_path, config)
+
+
+# The rectangle every `TestXlsxSpans` entry names -- a bold, ruled header row
+# and one data row, exercising a date and a currency figure. See
+# `write_workbook`, which builds the sheet it comes from.
+XLSX_RANGE: dict[str, Any] = {
+    "col-start": "C",
+    "col-end": "G",
+    "row-start": 3,
+    "row-end": 5,
+}
+
+
+class TestXlsxSpans:
+    """An `.xlsx` entry brings in one cell rectangle as blocks, not Markdown."""
+
+    @pytest.fixture
+    def workbook_dir(self, tmp_path: Path) -> Path:
+        write_workbook(tmp_path / "Rechnung.xlsx")
+        (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
+        return tmp_path
+
+    def test_the_section_carries_one_table(self, workbook_dir: Path) -> None:
+        cv = spans(
+            workbook_dir,
+            {
+                "source": "Rechnung.xlsx",
+                "format": "xlsx",
+                "title": "Rechnungsbeträge",
+                **XLSX_RANGE,
+            },
+        )
+        section = cv.section("rechnungsbetrage")
+        assert section is not None
+        assert [type(block) for block in section.blocks] == [RichTable]
+        assert section.markdown == ""
+
+    def test_the_source_file_is_recorded(self, workbook_dir: Path) -> None:
+        cv = spans(
+            workbook_dir,
+            {
+                "source": "Rechnung.xlsx",
+                "format": "xlsx",
+                "title": "Rechnungsbeträge",
+                **XLSX_RANGE,
+            },
+        )
+        section = cv.section("rechnungsbetrage")
+        assert section is not None
+        assert section.source is not None
+        assert section.source.endswith("Rechnung.xlsx")
+
+    def test_a_title_is_required(self, workbook_dir: Path) -> None:
+        # There is no `begin` headline to fall back on, unlike a `.docx` entry:
+        # row and column bounds carry no heading to name the section after.
+        with pytest.raises(CVParseError, match="needs a 'title'"):
+            spans(workbook_dir, {"source": "Rechnung.xlsx", "format": "xlsx", **XLSX_RANGE})
+
+    def test_a_missing_workbook_is_an_error_naming_the_entry(self, tmp_path: Path) -> None:
+        (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
+        config = {
+            "sections": [
+                {"source": "document.md", "format": "md", "end": "Projekte"},
+                {
+                    "source": "Rechnung.xlsx",
+                    "format": "xlsx",
+                    "title": "Rechnungsbeträge",
+                    **XLSX_RANGE,
+                },
+            ],
+        }
+        with pytest.raises(CVParseError, match=r"sections\[1\]: no such file"):
             build(tmp_path, config)
 
 
@@ -428,13 +603,16 @@ class TestTheHeader:
     """No `metadata` key: the header rides along with a span that starts at the top."""
 
     def test_frontmatter_and_summary_come_from_that_file(self, four_sections: Path) -> None:
-        cv = spans(four_sections, {"source": "document.md", "begin": "Sprachen"})
+        cv = spans(four_sections, {"source": "document.md", "format": "md", "begin": "Sprachen"})
         assert cv.name == "Ada Lovelace"
         assert cv.summary == "Ein Kurzprofil."
 
     def test_a_span_that_carries_sections_supplies_it_too(self, four_sections: Path) -> None:
         # The ordinary case: one entry brings the header *and* the first sections.
-        cv = build(four_sections, {"sections": [{"source": "document.md", "end": "Kenntnisse"}]})
+        cv = build(
+            four_sections,
+            {"sections": [{"source": "document.md", "format": "md", "end": "Kenntnisse"}]},
+        )
         assert cv.name == "Ada Lovelace"
         assert cv.summary == "Ein Kurzprofil."
         assert [s.title for s in cv.sections] == ["Berufserfahrung", "Projekte"]
@@ -451,8 +629,8 @@ class TestTheHeader:
             tmp_path,
             {
                 "sections": [
-                    {"source": "document.md", "end": "Berufserfahrung"},
-                    {"source": "other.md"},
+                    {"source": "document.md", "format": "md", "end": "Berufserfahrung"},
+                    {"source": "other.md", "format": "md"},
                 ]
             },
         )
@@ -467,9 +645,14 @@ class TestTheHeader:
             projects_dir,
             {
                 "sections": [
-                    {"source": PROJEKTLISTE_NAME, "begin": "Projekthistorie", "title": "Projekte"},
-                    {"source": "document.md", "begin": "Kenntnisse"},
-                    {"source": "document.md", "end": "Berufserfahrung"},
+                    {
+                        "source": PROJEKTLISTE_NAME,
+                        "format": "docx",
+                        "begin": "Projekthistorie",
+                        "title": "Projekte",
+                    },
+                    {"source": "document.md", "format": "md", "begin": "Kenntnisse"},
+                    {"source": "document.md", "format": "md", "end": "Berufserfahrung"},
                 ]
             },
         )
@@ -477,11 +660,17 @@ class TestTheHeader:
 
     def test_no_entry_starting_at_the_top_is_an_error(self, four_sections: Path) -> None:
         with pytest.raises(CVParseError, match="no section starts at the beginning of a Markdown"):
-            build(four_sections, {"sections": [{"source": "document.md", "begin": "Sprachen"}]})
+            build(
+                four_sections,
+                {"sections": [{"source": "document.md", "format": "md", "begin": "Sprachen"}]},
+            )
 
     def test_the_error_says_how_to_fix_it(self, four_sections: Path) -> None:
         with pytest.raises(CVParseError, match=r"Leave 'begin' out of the entry"):
-            build(four_sections, {"sections": [{"source": "document.md", "begin": "Sprachen"}]})
+            build(
+                four_sections,
+                {"sections": [{"source": "document.md", "format": "md", "begin": "Sprachen"}]},
+            )
 
     def test_the_photo_is_relative_to_that_file(self, tmp_path: Path) -> None:
         sub = tmp_path / "sub"
@@ -491,20 +680,28 @@ class TestTheHeader:
             "---\nname: Ada\nphoto: portrait.png\n---\n\n## Sprachen\n\n- Deutsch\n",
             encoding="utf-8",
         )
-        cv = build(tmp_path, {"sections": [{"source": "sub/document.md"}]})
+        cv = build(tmp_path, {"sections": [{"source": "sub/document.md", "format": "md"}]})
         assert cv.photo is not None
 
     def test_that_file_must_carry_frontmatter(self, tmp_path: Path) -> None:
         (tmp_path / "document.md").write_text("## Sprachen\n\n- Deutsch\n", encoding="utf-8")
         with pytest.raises(CVParseError, match="supplies the CV's header -- missing YAML"):
-            build(tmp_path, {"sections": [{"source": "document.md"}]})
+            build(tmp_path, {"sections": [{"source": "document.md", "format": "md"}]})
 
 
 class TestUnsupportedSources:
-    def test_a_format_neither_reader_handles_is_an_error(self, four_sections: Path) -> None:
-        (four_sections / "notes.txt").write_text("Sprachen\n", encoding="utf-8")
-        with pytest.raises(CVParseError, match=r"expected \.md or \.docx, got \.txt"):
-            spans(four_sections, {"source": "notes.txt", "begin": "Sprachen"})
+    def test_an_unrecognised_format_value_is_rejected_by_the_schema(
+        self, four_sections: Path
+    ) -> None:
+        # "format" is not guessed from the file, so a value neither reader
+        # understands has to be caught here rather than surfacing as a read error.
+        with pytest.raises(CVParseError, match="format"):
+            load_config(
+                write_config(
+                    four_sections,
+                    {"sections": [{"source": "document.md", "format": "txt", "begin": "Sprachen"}]},
+                )
+            )
 
 
 class TestLoadCV:
@@ -551,24 +748,24 @@ class TestRepositoryRecipe:
         assert name == "document"
         assert [s.title for s in cv.sections] == [
             "Berufserfahrung",
-            "Projekte",
+            "Rechnungsbeträge",
             "Kenntnisse",
             "Ausbildung",
             "Sprachen",
         ]
 
-    def test_the_projects_come_from_the_word_list(self, sample_config_path: Path) -> None:
-        projects = load_cv(sample_config_path).cv.section("projekte")
-        assert projects is not None
-        assert projects.blocks
-        assert projects.source is not None
-        assert projects.source.endswith(".docx")
+    def test_the_invoice_figures_come_from_the_workbook(self, sample_config_path: Path) -> None:
+        section = load_cv(sample_config_path).cv.section("rechnungsbetrage")
+        assert section is not None
+        assert section.blocks
+        assert section.source is not None
+        assert section.source.endswith(".xlsx")
 
     def test_every_other_section_comes_from_the_markdown_file(
         self, sample_config_path: Path
     ) -> None:
         cv = load_cv(sample_config_path).cv
-        markdown = [s for s in cv.sections if s.slug != "projekte"]
+        markdown = [s for s in cv.sections if s.slug != "rechnungsbetrage"]
         assert all(s.source is not None and s.source.endswith("document.md") for s in markdown)
         assert all(s.markdown for s in markdown)
 
@@ -577,5 +774,21 @@ def test_build_cv_takes_a_config_object(projects_dir: Path) -> None:
     # The API a caller assembling a recipe in Python uses; the CLI is one caller.
     config = BuildConfig.model_validate(PROJECTS_CONFIG)
     cv, name = build_cv(config, projects_dir)
+    assert [s.title for s in cv.sections] == ["Berufserfahrung", "Projekte", "Kenntnisse"]
+    assert name == "document"
+
+
+def test_build_cv_falls_back_to_the_project_root(tmp_path: Path) -> None:
+    # The recipe lives in a subdirectory of the project; its sources live at the
+    # project root instead of beside it -- resolve_source's project_root fallback
+    # is what still finds them.
+    write_projektliste(tmp_path / PROJEKTLISTE_NAME)
+    (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
+    recipe_dir = tmp_path / "recipe"
+    recipe_dir.mkdir()
+    config = BuildConfig.model_validate(PROJECTS_CONFIG)
+
+    cv, name = build_cv(config, recipe_dir, project_root=tmp_path)
+
     assert [s.title for s in cv.sections] == ["Berufserfahrung", "Projekte", "Kenntnisse"]
     assert name == "document"

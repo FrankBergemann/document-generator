@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from cv_generator.errors import RenderError
-from cv_generator.models import CV, Contact, Link
+from cv_generator.models import CV, Contact, Link, RichCell, RichParagraph, RichRun, RichTable
 from cv_generator.parser import load_cv, parse_cv
-from cv_generator.render import Renderer
+from cv_generator.render import Renderer, blocks_to_html
 from tests.conftest import PROJECTS_CONFIG, PROJECTS_MD, write_config
 from tests.support import PROJEKTLISTE_NAME, SAMPLE_PROJECTS, Project, write_projektliste
 
@@ -148,6 +148,39 @@ class TestImportedBlocks:
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html
         assert "a &amp; b" in html
+
+
+def _one_cell_table(*, centered: bool, column_widths: list[float] | None = None) -> RichTable:
+    cell = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="x")])])
+    return RichTable(
+        rows=[[cell, cell]],
+        centered=centered,
+        column_widths=column_widths or [],
+    )
+
+
+class TestCenteredTable:
+    """An `.xlsx` import sizes its table to its content and centers it."""
+
+    def test_a_centered_table_gets_the_class(self) -> None:
+        html = blocks_to_html([_one_cell_table(centered=True)])
+        assert '<table class="cv-block-table cv-block-table--centered">' in html
+
+    def test_a_non_centered_table_does_not(self) -> None:
+        html = blocks_to_html([_one_cell_table(centered=False)])
+        assert '<table class="cv-block-table">' in html
+        assert "cv-block-table--centered" not in html
+
+    def test_a_centered_table_ignores_its_column_widths(self) -> None:
+        # The source's proportions would misdescribe a table sized to its own
+        # content instead of stretched to fill the page.
+        html = blocks_to_html([_one_cell_table(centered=True, column_widths=[0.5, 0.5])])
+        assert "<colgroup>" not in html
+
+    def test_a_non_centered_table_keeps_its_column_widths(self) -> None:
+        html = blocks_to_html([_one_cell_table(centered=False, column_widths=[0.5, 0.5])])
+        assert "<colgroup>" in html
+        assert html.count('<col style="width:50%">') == 2
 
 
 class TestPhoto:

@@ -60,8 +60,6 @@ from docx.types import ProvidesStoryPart
 from cv_generator.errors import CVParseError
 from cv_generator.models import RichBlock, RichCell, RichParagraph, RichRun, RichTable
 
-DOCX_SUFFIX = ".docx"
-
 # Word's lock file for an open document: same suffix, not a document. Without
 # this, simply having the file open would turn discovery into "more than one".
 LOCK_PREFIX = "~$"
@@ -446,4 +444,4 @@ def _child_where(
     return None
 
 
-__all__ = ["DOCX_SUFFIX", "LOCK_PREFIX", "load_section"]
+__all__ = ["LOCK_PREFIX", "load_section"]

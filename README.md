@@ -2,8 +2,9 @@
 
 Generate a file with content from a number of source files. A short
 [`data/config.json`](data/config.json) says which section comes from where — a
-span of a Markdown file, or a section of a Word document — and the tool produces one
-styled, print-ready document as **HTML**, **PDF** or **MS Word (.docx)**.
+span of a Markdown file, a section of a Word document, or a cell rectangle from
+an Excel workbook — and the tool produces one styled, print-ready document as
+**HTML**, **PDF** or **MS Word (.docx)**.
 
 ## Everything you run lives in `run/`
 
@@ -126,6 +127,7 @@ run/build.sh -f html -f docx     # a subset; -f is repeatable
 run/build.sh -o out.pdf
 run/build.sh -t classic          # theme (HTML/PDF only)
 run/build.sh other/config.json   # a different recipe
+run/build.sh --config other/config.json  # the same, as a named flag
 run/build.sh notes/talk.md       # a single Markdown file, no recipe
 run/validate.sh                  # assemble and report, write nothing
 run/themes.sh
@@ -208,32 +210,36 @@ written down, and it is the whole of it:
 ```json
 {
   "sections": [
-    { "source": "document.md",                                          "end": "Kenntnisse" },
-    { "source": "*Projektliste*.docx", "begin": "Projekthistorie", "end": "Ausbildung",
-      "title": "Projekte" },
-    { "source": "document.md",               "begin": "Kenntnisse" }
+    { "source": "document.md",           "format": "md",                     "end": "Kenntnisse" },
+    { "source": "Rechnungsbeträge.xlsx", "format": "xlsx", "col-start": "C", "col-end": "G",
+      "row-start": 3, "row-end": 15, "title": "Rechnungsbeträge" },
+    { "source": "document.md",           "format": "md",   "begin": "Kenntnisse" }
   ]
 }
 ```
 
 ```
 data/
-  config.json            the recipe above
-  document.md                  header + Berufserfahrung, Kenntnisse, Ausbildung, Sprachen
-  Projektliste.docx      "Projekthistorie", one table per project
+  config.json                the recipe above
+  document.md                header + Berufserfahrung, Kenntnisse, Ausbildung, Sprachen
+  Rechnungsbeträge.xlsx      C3:G15, one invoice's line items
   photo.jpg
 ```
 
-Three entries, five sections: Berufserfahrung, **Projekte** (from Word),
-Kenntnisse, Ausbildung, Sprachen. Edit either file, rebuild, and the CV follows.
+Three entries, five sections: Berufserfahrung, **Rechnungsbeträge** (from
+Excel), Kenntnisse, Ausbildung, Sprachen. Edit either file, rebuild, and the CV
+follows. (An earlier version of this same recipe imported a project list from a
+`.docx` the same way — see `format` below; the mechanism is the same for both.)
 
 | Key | Meaning |
 |---|---|
 | `sections` | One entry per span, concatenated in the order listed. The only key a recipe needs. |
-| `source` | A file in the recipe's own directory. May be a glob — `*Projektliste*.docx` survives the list being reissued with a new date in its name — and then has to match exactly one file. |
-| `begin` | The headline the span starts at. Matched case-insensitively, with or without its `##`. **Leave it out** and the span starts at the top of the file. |
-| `end` | The headline it stops **before** — that headline belongs to whatever comes next and is not copied. **Leave it out** and the span runs to the end of the file. An `end` that never turns up is an error, not "run to the end": the recipe said where to stop. |
-| `title` | Renames the span's first section. `Projekthistorie` in Word, `Projekte` in the document. |
+| `source` | A file in the recipe's own directory, or (if not found there) relative to the project root. May be a glob — `*Projektliste*.docx` survives the list being reissued with a new date in its name — and then has to match exactly one file; the project-root fallback does not apply to a glob. |
+| `format` | Which reader parses `source`: `md`, `docx`, or `xlsx`. Required, and not guessed from `source`'s suffix — a glob or a reissued file's name is not a promise about its content. |
+| `begin` | The headline the span starts at (`.md`/`.docx` only). Matched case-insensitively, with or without its `##`. **Leave it out** and the span starts at the top of the file. |
+| `end` | The headline it stops **before** (`.md`/`.docx` only) — that headline belongs to whatever comes next and is not copied. **Leave it out** and the span runs to the end of the file. An `end` that never turns up is an error, not "run to the end": the recipe said where to stop. |
+| `col-start` / `col-end` / `row-start` / `row-end` | The cell rectangle to copy (`xlsx` only), Excel's own way — column letters and 1-based row numbers, **both ends inclusive**. Required together; rejected for any other `format`. |
+| `title` | Renames the span's first section. Required for an `xlsx` entry, which has no `begin` to fall back on. |
 | `output` | The stem the results take: `dist/document.html`, `dist/document.docx`, `dist/document.pdf`. Defaults to that of the file the header came from — `document.md`, hence `dist/document.*`. |
 
 ### Where the header comes from
@@ -247,7 +253,7 @@ which supplies the header *and* Berufserfahrung.
 To take a file's header and none of its sections, end at its first heading:
 
 ```json
-{ "source": "document.md", "end": "Berufserfahrung" }
+{ "source": "document.md", "format": "md", "end": "Berufserfahrung" }
 ```
 
 A later entry that also starts at the top contributes only its sections: the CV
@@ -259,10 +265,10 @@ does. If no entry starts at the top of a Markdown file, the build fails saying s
 
 A **Markdown span is split at its own `##` headings**, the way a single-file CV
 is, so the third entry above contributes three sections, each with its own
-heading and anchor. A **`.docx` span is one section**: imported blocks are
-paragraphs and tables with no headings of their own, so there is nothing to split
-them at — and nothing to name it after, so such an entry needs a `title` if it
-has no `begin`.
+heading and anchor. A **`.docx` or `.xlsx` span is one section**: imported
+blocks and an imported cell rectangle have no headings of their own to split at
+— and nothing to name it after, so such an entry needs a `title` (always, for
+`.xlsx`; only when it has no `begin` either, for `.docx`).
 
 Unknown keys are rejected, so a typo fails loudly rather than silently dropping a
 section. A file may be used any number of times, and the spans need not be in the
@@ -280,6 +286,16 @@ single Markdown file as its own header and sections, as before.
 | Kept | Bold, italic, underline, strikethrough, size, colour, hyperlinks, bullets and their nesting, table columns and widths, whether the table is ruled. |
 | Not kept | Font family, page setup, paragraph spacing — those stay the CV's own, so the imported projects sit in this document rather than importing a second design. |
 
+### What an imported Excel range keeps
+
+| | |
+|---|---|
+| Which part of it | The rectangle `col-start`/`row-start` to `col-end`/`row-end`, **both ends inclusive** — Excel's own addressing, not the exclusive `end` above. A blank row or column inside it stays, since it is part of the grid, not spacing between blocks. |
+| Cell values | The value Excel last calculated and cached (`data_only` reading) — a formula cell in a workbook that has never been reopened in Excel since editing has nothing cached and reads empty. A date becomes `DD.MM.YYYY`; a format naming a currency symbol (€, $, £) becomes a two-decimal, thousands-grouped amount with that symbol; anything else renders in Excel's general style. This is an approximation of Excel's number-format language, not an implementation of it. |
+| Kept | Bold, italic, underline, strikethrough, font size, and whether any cell in the range is ruled (one flag for the whole table, not per edge). |
+| Layout | Sized to its own content and **centered**, unlike an imported Word section, which fills the page. The sheet's own column *widths* are read but not used for this reason — there is no page-width table for their proportions to describe. |
+| Not kept | Font family and page layout, for the same reason as a Word import — and a cell's colour when it is a theme reference rather than a literal RGB value, which is most of them. |
+
 `run/validate.sh` prints which file fed which section, which is the thing to
 check before a build goes out — a recipe resolves globs and headlines, and
 neither is visible in the result:
@@ -288,7 +304,7 @@ neither is visible in the result:
 data/config.json: ok - Frank Bergemann, 5 section(s) -> document.*
   photo: image/jpeg, 680 kB
   - Berufserfahrung (berufserfahrung) <- data/document.md
-  - Projekte (projekte) <- 25 block(s) from data/Bergemann-Projektliste_19_08_2026.docx
+  - Rechnungsbeträge (rechnungsbetrage) <- 1 block(s) from data/Rechnungsbeträge.xlsx
   - Kenntnisse (kenntnisse) <- data/document.md
   - Ausbildung (ausbildung) <- data/document.md
   - Sprachen (sprachen) <- data/document.md
@@ -305,8 +321,10 @@ data/config.json ─── config.py ──┐            ┌─ render.py ─> 
   which span, which file         │            │                     └─ pdf/chrome.py ─> .pdf
 data/document.md ──────────────────────┼ parser.py ─┤        (pydantic)
   frontmatter + Markdown         │  CV model  └─ word.py ──────────────────────────────> .docx
-*Projektliste*.docx ─────────────┘
+*Projektliste*.docx ─────────────┤
   "Projekthistorie"   docx_import.py
+*.xlsx ───────────────────────────┘
+  a cell rectangle    xlsx_import.py
 ```
 
 - [src/cv_generator/config.py](src/cv_generator/config.py) — the recipe's schema, and resolving a `source` to one file
@@ -314,6 +332,7 @@ data/document.md ─────────────────────
 - [src/cv_generator/models.py](src/cv_generator/models.py) — the validated `CV` schema
 - [src/cv_generator/markdown.py](src/cv_generator/markdown.py) — the one Markdown parser both backends share
 - [src/cv_generator/docx_import.py](src/cv_generator/docx_import.py) — a Word section → blocks in the model
+- [src/cv_generator/xlsx_import.py](src/cv_generator/xlsx_import.py) — a cell rectangle → blocks in the model
 - [src/cv_generator/render.py](src/cv_generator/render.py) — model → self-contained HTML
 - [src/cv_generator/word.py](src/cv_generator/word.py) — model → `.docx` (see `WordTheme`)
 - [src/cv_generator/ooxml.py](src/cv_generator/ooxml.py) — the OOXML bits python-docx has no API for
@@ -379,9 +398,9 @@ extension:
 - Word's own **list styles** for bullets and numbers, including nesting.
 - Real **hyperlinks** for the email address and every link.
 - **Tables**, fenced code, blockquotes and horizontal rules.
-- The **imported project list** as real Word tables: the source's column
-  proportions scaled to this page, its runs' weight, size and colour, and Word's
-  own bullet styles.
+- An **imported `.docx` section or `.xlsx` range** as real Word tables: the
+  source's column proportions scaled to this page, its runs' weight, size and
+  colour, and (for `.docx`) Word's own bullet styles.
 - The **photo**, embedded in the document, placed by a borderless layout table
   because Word has no flexbox: identity left, portrait against the right margin.
 - A4 page setup, `keep-with-next` on headings so no entry title is orphaned at a

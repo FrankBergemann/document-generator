@@ -2,9 +2,10 @@
 
 CLI that assembles a styled CV as HTML, PDF or MS Word from the files it is
 written in: [data/config.json](data/config.json) lists, per section, the source
-file and the headlines bounding the span to copy. Sources are `.md` (YAML
-frontmatter + Markdown body) or `.docx`. A single `.md` still builds on its own,
-with no recipe. See [README.md](README.md) for the source format and usage.
+file, its `format`, and either the headlines bounding the span to copy (`.md`,
+`.docx`) or the cell rectangle to copy (`.xlsx`). A single `.md` still builds on
+its own, with no recipe. See [README.md](README.md) for the source format and
+usage.
 
 ## Commands
 
@@ -31,6 +32,7 @@ run/build.sh -f html            # one format; -f is repeatable
 run/build.sh -f pdf             # needs chromium, see below
 run/build.sh -f docx
 run/build.sh notes/talk.md      # a single .md, no recipe
+run/build.sh --config other/config.json  # a different recipe, as a named flag
 run/validate.sh                 # names the file behind each section
 ```
 
@@ -141,8 +143,10 @@ config.json ─── config.py ──┐            ┌─ render.py ─> HTML 
   which span, which file    │            │                     └─ pdf/chrome.py ─> .pdf
 document.md ──────────────────────┼ parser.py ─┤        (pydantic)
                             │  CV model  └─ word.py ──────────────────────────────> .docx
-*Projektliste*.docx ────────┘
+*Projektliste*.docx ────────┤
   "Projekthistorie"  docx_import.py
+*.xlsx ──────────────────────┘
+  a cell rectangle    xlsx_import.py
 ```
 
 Each stage only knows the one before it. Adding an output format, a theme or a
@@ -218,16 +222,28 @@ the recipe file's name — `dist/config.html` would be nobody's document.
 [config.py](src/cv_generator/config.py) is the schema; `parser.build_cv` is the
 assembly. A `sections` entry copies one span of one file:
 
-- **`end` is exclusive, for both source types.** The span stops *before* that
+- **`format` says which reader parses `source`, and is required.** `"md"`,
+  `"docx"` or `"xlsx"` — not guessed from `source`'s own suffix, because `source`
+  may be a glob or a reissued file whose name is not a promise about its
+  content. This is what `build_cv` switches on; it does not look at the resolved
+  path's suffix at all.
+- **An `"xlsx"` entry names a cell rectangle, not headlines.** `col-start`,
+  `col-end`, `row-start` and `row-end` (a `SectionSpec` model validator requires
+  all four together, and rejects all four for any other format) take the place
+  of `begin`/`end` — a spreadsheet has no headings to bound a span with. Unlike
+  `end` below, all four corners are **inclusive**, Excel's own convention. See
+  [Imported Excel ranges](#imported-excel-ranges).
+- **`end` is exclusive, for `.md` and `.docx`.** The span stops *before* that
   headline, so `end` names what comes next. Uniform on purpose — the natural
   reading differs between a `.md` (where a heading delimits a section) and a
   `.docx` (where it delimits an import), and two meanings for one key would be a
   trap. An `end` that never turns up is an error, not "run to the end of the
   file": the recipe stated where to stop, so importing the rest would put another
   section's content under this heading.
-- **A Markdown span is split at its `##` headings; a `.docx` span is not.**
-  Imported blocks have no headings to split at. That asymmetry is what lets three
-  entries describe the five-section sample document.
+- **A Markdown span is split at its `##` headings; a `.docx` or `.xlsx` span is
+  not.** Imported blocks and an imported rectangle have no headings to split at.
+  That asymmetry is what lets three entries describe the five-section sample
+  document.
 - **`source` may be a glob, and then has to match exactly one file.** The real
   project list carries a date in its name, so a literal name goes stale every
   time it is reissued; that is what the old `find_docx` marker convention was for
@@ -235,6 +251,14 @@ assembly. A `sections` entry copies one span of one file:
   — guessing would publish a CV built from last year's list. Word's `~$…` lock
   file never counts, or having the document open would break every build,
   exactly when someone is most likely to rebuild.
+- **A plain (non-glob) `source` not found beside the config is tried again
+  relative to the project root.** `resolve_source`'s `base_dir` (the config's own
+  directory) wins when a file exists in both places, so this is a fallback, not a
+  second meaning — a section may point at a file kept at the top of the project
+  instead of beside the recipe that names it. The fallback does not apply to a
+  glob. `build_cv`'s callers pass `project_root=Path.cwd()`, which is the project
+  root by the same convention that makes the CLI's own default source
+  (`data/config.json`) relative to it: `run/*.sh` all `cd` there first.
 - **The `output` name comes from the recipe, not from the recipe file.** Every
   project's recipe is called `config.json`; `dist/config.html` would be nobody's
   document. `load_cv` returns the CV and that name together for this reason.
@@ -279,6 +303,63 @@ The fixture is *built*, not committed: `write_projektliste` in
 (bold 12pt headings, per-project tables, direct `numPr` bullets, a section before
 and after the imported one). A committed `.docx` would be an opaque blob.
 
+## Imported Excel ranges
+
+An `"xlsx"` entry's content is a rectangle of cells, named by its corners
+(`col-start`/`col-end`/`row-start`/`row-end`, all inclusive — see
+[The recipe](#the-recipe)) rather than by headings, since a spreadsheet has none.
+Like a `.docx` import it arrives as one `blocks` entry with `markdown=""`; unlike
+one it is always exactly one `RichTable`, because there is nothing inside a
+rectangle to split several blocks at. The mechanism is
+[xlsx_import.py](src/cv_generator/xlsx_import.py).
+
+Three things worth knowing before touching it:
+
+- **Cells are read with `data_only=True`.** A formula cell's value is whatever
+  Excel last calculated and cached into the file, not something this project
+  recomputes. A workbook that has never been opened in Excel since a formula was
+  entered has nothing cached, and that cell reads as empty — a property of
+  `.xlsx` itself, not a bug here.
+- **Number formatting is approximated, not interpreted.** Excel's format-code
+  language covers locales, conditional sections and dozens of tokens; this
+  module reads just enough of it for a CV-adjacent spreadsheet. A date or
+  datetime becomes `DD.MM.YYYY` (the time of day, if any, is dropped); a format
+  naming a currency symbol (€, $, £) becomes a two-decimal, German-grouped
+  amount with that symbol (`1.275,00 €`); anything else is Python's own
+  rendering of the value. `_format_number` and `_display_value` are the two
+  functions to extend if another shape turns up.
+- **Font colour is not carried over.** A cell's colour is usually a theme
+  reference (`Color(theme=1, ...)`), not a literal RGB value, and resolving a
+  theme means parsing `xl/theme1.xml`'s colour scheme — this module reads a
+  literal `rgb` colour when a cell happens to have one and leaves it `None`
+  otherwise, the same "direct value only, no chain to walk" limit `docx_import`
+  accepts for character styles it cannot resolve.
+
+Whether any cell in the rectangle carries a border decides `RichTable.bordered`
+for the *whole* table — there is no per-cell border in the model, so this is a
+coarser signal than Excel's own per-edge borders, the same simplification
+`docx_import._is_bordered` makes for a `.docx` table's own ruling.
+
+**`RichTable.centered` is always `True` for an `.xlsx` import, always `False`
+for a `.docx` one.** A `.docx` table is meant to fill the page the way it did in
+the source document -- that is what `column_widths` scaled to
+`WordTheme.content_width_mm` (`.docx` output) or `<col style="width:…%">` inside
+a `width:100%` table (HTML) already do. A spreadsheet range reads more like a
+figure dropped into the page, so it is sized to its own content instead and
+centered: `.cv-block-table--centered` (`width: auto; margin: … auto;`) in HTML,
+and in `.docx` no explicit column widths are set at all -- Word's own default
+`autofit` sizes each column to its content -- with `table.alignment =
+WD_TABLE_ALIGNMENT.CENTER` (`word.py::_add_imported_table`). `column_widths` is
+still populated for a centered table (it costs nothing to keep), but both
+backends ignore it there; only `bordered` and the run-level formatting still
+apply.
+
+The fixture is *built*, not committed, for the same reason `write_projektliste`
+is: `write_workbook` in [tests/support.py](tests/support.py) writes a workbook
+with a bold, ruled header row and one data row (a date, a plain number, a
+currency figure), plus content just outside the rectangle every test asks for —
+the negative control for "the importer respected the corners it was given".
+
 ## Word output specifics
 
 `word.py` mirrors `templates/classic/document.css` as a `WordTheme` dataclass, because
@@ -322,7 +403,8 @@ the `requires_chromium` marker, live in [tests/support.py](tests/support.py).
 - Nothing in `tests/data/` has a recipe, which is what keeps the single-`.md` path
   covered. Add one there and those tests start needing a `.docx`.
 - `data/document.md` and `data/config.json` are both exercised by a test, so they must
-  stay valid — including `data/photo.jpg` and the `.docx` the recipe globs for.
+  stay valid — including `data/photo.jpg` and `data/Rechnungsbeträge.xlsx`, the
+  workbook the recipe's `"xlsx"` entry names.
 
 PDF assertions use `pypdf` to check real page geometry and extracted text rather
 than only that a file appeared.

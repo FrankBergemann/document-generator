@@ -13,6 +13,7 @@ from tests.support import (
     LOCAL_CHROME_INSTALLED,
     PROJEKTLISTE_NAME,
     requires_chromium,
+    write_projektliste,
 )
 
 
@@ -166,6 +167,37 @@ class TestBuildFromARecipe:
         assert main(["build", str(projects_path), "-o", str(out)]) == 0
         assert out.is_file()
 
+    def test_config_flag_is_equivalent_to_the_positional_source(
+        self, tmp_path: Path, projects_path: Path
+    ) -> None:
+        out = tmp_path / "document.html"
+        assert main(["build", "--config", str(projects_path), "-o", str(out)]) == 0
+        assert "Python" in out.read_text(encoding="utf-8")
+
+    def test_source_and_config_together_is_a_clean_error(
+        self, projects_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code = main(["build", str(projects_path), "--config", str(projects_path)])
+        assert code == 1
+        assert "not both" in capsys.readouterr().err
+
+    def test_source_not_beside_the_recipe_is_found_at_the_project_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # document.md and the project list live at the project root; the recipe
+        # sits in a subdirectory of it, so `source` cannot be found beside the
+        # config and falls back to the project root -- here, the cwd.
+        write_projektliste(tmp_path / PROJEKTLISTE_NAME)
+        (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
+        recipe_dir = tmp_path / "recipe"
+        recipe_dir.mkdir()
+        config_path = write_config(recipe_dir, PROJECTS_CONFIG)
+
+        monkeypatch.chdir(tmp_path)
+        out = tmp_path / "document.html"
+        assert main(["build", "--config", str(config_path), "-o", str(out)]) == 0
+        assert "Python" in out.read_text(encoding="utf-8")
+
 
 class TestBuildWithPhoto:
     def test_html_embeds_the_photo(self, tmp_path: Path, photo_path: Path) -> None:
@@ -314,8 +346,8 @@ class TestValidate:
             tmp_path,
             {
                 "sections": [
-                    {"source": "document.md", "end": "Berufserfahrung"},
-                    {"source": "*Projektliste*.docx", "begin": "Projekthistorie"},
+                    {"source": "document.md", "format": "md", "end": "Berufserfahrung"},
+                    {"source": "*Projektliste*.docx", "format": "docx", "begin": "Projekthistorie"},
                 ]
             },
         )

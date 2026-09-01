@@ -40,14 +40,15 @@ Dieser Text steht in der Markdown-Datei und darf nicht im Ergebnis landen.
 # with it, then Word, then Markdown again.
 PROJECTS_CONFIG: dict[str, Any] = {
     "sections": [
-        {"source": "document.md", "end": "Projekte"},
+        {"source": "document.md", "format": "md", "end": "Projekte"},
         {
             "source": PROJEKTLISTE_NAME,
+            "format": "docx",
             "begin": "Projekthistorie",
             "end": "Ausbildung",
             "title": "Projekte",
         },
-        {"source": "document.md", "begin": "Kenntnisse"},
+        {"source": "document.md", "format": "md", "begin": "Kenntnisse"},
     ],
 }
 

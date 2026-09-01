@@ -195,6 +195,14 @@ body {
   break-inside: avoid-page;
 }
 
+.cv-block-table--centered {
+  /* Sized to its own content, not stretched to the page -- a table at 100%
+     width has no room either side of it to be centered into. */
+  width: auto;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .cv-block-table td {
   padding: 0.25rem 0.35rem;
   vertical-align: top;

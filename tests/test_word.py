@@ -16,13 +16,24 @@ from pathlib import Path
 import docx
 import pytest
 from docx.document import Document as WordDocument
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml.ns import qn
 from docx.table import Table
 
 from cv_generator.errors import RenderError
-from cv_generator.models import CV, Contact, Link, Photo
+from cv_generator.models import (
+    CV,
+    Contact,
+    Link,
+    Photo,
+    RichCell,
+    RichParagraph,
+    RichRun,
+    RichTable,
+    Section,
+)
 from cv_generator.ooxml import HYPERLINK_RELATIONSHIP
 from cv_generator.parser import parse_cv
 from cv_generator.word import (
@@ -535,6 +546,30 @@ class TestImportedBlocks:
             for row in table.rows:
                 for cell in row.cells:
                     assert cell.paragraphs
+
+
+def _cv_with_table(*, centered: bool, column_widths: list[float] | None = None) -> CV:
+    cell = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="x")])])
+    table = RichTable(rows=[[cell, cell]], centered=centered, column_widths=column_widths or [])
+    section = Section(title="Zahlen", slug="zahlen", markdown="", blocks=[table])
+    return CV(name="Ada", sections=[section])
+
+
+class TestCenteredImportedTable:
+    """An `.xlsx` import sizes its table to its content and centers it."""
+
+    def test_a_centered_table_is_centered_and_autofits(self, tmp_path: Path) -> None:
+        doc = read(write(_cv_with_table(centered=True), tmp_path))
+        table = doc.tables[0]
+        assert table.alignment == WD_TABLE_ALIGNMENT.CENTER
+        assert table.autofit is True
+
+    def test_a_non_centered_table_is_scaled_to_the_page_instead(self, tmp_path: Path) -> None:
+        doc = read(write(_cv_with_table(centered=False, column_widths=[0.5, 0.5]), tmp_path))
+        table = doc.tables[0]
+        assert table.alignment is None
+        widths = [column.width for column in table.columns]
+        assert all(width is not None for width in widths)
 
 
 class TestTheme:

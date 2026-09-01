@@ -8,6 +8,7 @@ Commands::
     document-generator build -f docx                 # -> dist/document.docx  (MS Word)
     document-generator build -f html -f pdf
     document-generator build other/config.json       # a different recipe
+    document-generator build --config other/config.json  # the same, as a named flag
     document-generator build notes/talk.md           # a single Markdown file, no recipe
     document-generator validate
     document-generator engines
@@ -61,8 +62,14 @@ def build_parser() -> argparse.ArgumentParser:
         "source",
         nargs="?",
         type=Path,
-        default=DEFAULT_SOURCE,
+        default=None,
         help=f"build recipe (.json) or a single CV Markdown file (default: {DEFAULT_SOURCE})",
+    )
+    build.add_argument(
+        "--config",
+        type=Path,
+        help="build recipe (.json), relative to the project root; an alternative to the "
+        "positional source argument, for scripts that want a named flag",
     )
     build.add_argument(
         "-f",
@@ -135,11 +142,24 @@ def resolve_formats(requested: list[str] | None, out: Path | None) -> tuple[str,
     return (fmt,)
 
 
+def resolve_input(source: Path | None, config: Path | None) -> Path:
+    """Which file `build` reads, from the positional `source` and `--config`.
+
+    The two name the same thing two ways -- a positional argument for the
+    common case, `--config` for a script that wants a named flag instead of a
+    bare path -- so giving both is a contradiction, not a preference to break.
+    """
+    if source is not None and config is not None:
+        raise CVError("pass either a source argument or --config, not both")
+    return config if config is not None else (source if source is not None else DEFAULT_SOURCE)
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     formats = resolve_formats(args.format, args.out)
+    source = resolve_input(args.source, args.config)
     # `name` rather than the source's stem: a recipe is called config.json and
     # says what its result is called, so dist/config.html would be nobody's document.
-    cv, name = load_cv(args.source)
+    cv, name = load_cv(source)
 
     # Rendered at most once and shared by the html and pdf outputs -- the pdf is
     # printed from exactly the document written next to it, not a second render.
