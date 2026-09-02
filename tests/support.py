@@ -18,6 +18,8 @@ importer is expected to read back.
 from __future__ import annotations
 
 import datetime
+import struct
+import zlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -294,3 +296,28 @@ def write_workbook(path: Path) -> Path:
 
     workbook.save(str(path))
     return path
+
+
+def png(width: int, height: int) -> bytes:
+    """A minimal valid PNG of exactly this pixel size.
+
+    Built by hand because the sizing rules need images of a chosen aspect ratio
+    and the project has no image library to draw one with.
+    """
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + kind
+            + payload
+            + struct.pack(">I", zlib.crc32(kind + payload))
+        )
+
+    header = struct.pack(">2I5B", width, height, 8, 0, 0, 0, 0)  # 8-bit greyscale
+    rows = b"".join(b"\x00" + b"\xff" * width for _ in range(height))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )

@@ -9,6 +9,7 @@ from cv_generator.models import (
     Contact,
     Document,
     Link,
+    Photo,
     RichCell,
     RichParagraph,
     RichRun,
@@ -200,6 +201,32 @@ class TestCenteredTable:
         html = blocks_to_html([_one_cell_table(centered=False, column_widths=[0.5, 0.5])])
         assert "<colgroup>" in html
         assert html.count('<col style="width:50%">') == 2
+
+
+class TestImportedImage:
+    """A picture in an imported `.docx` run (see `TestImages` in
+    test_docx_import.py) renders as an embedded `<img>`, the same way the
+    Document's own photo does."""
+
+    def test_an_image_run_becomes_an_img_element(self) -> None:
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="", image=photo)])])
+        assert '<img class="cv-inline-image" src="data:image/png;base64,' in html
+
+    def test_a_linked_image_is_wrapped_in_an_anchor(self) -> None:
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        run = RichRun(text="", image=photo, link="https://example.com")
+        html = blocks_to_html([RichParagraph(runs=[run])])
+        assert '<a href="https://example.com"><img class="cv-inline-image"' in html
+
+    def test_text_formatting_does_not_apply_to_an_image(self) -> None:
+        # Bold/italic/colour make no sense on a picture; only the image tag
+        # itself, and a link around it, are ever emitted for such a run.
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        run = RichRun(text="", image=photo, bold=True, color="FF0000")
+        html = blocks_to_html([RichParagraph(runs=[run])])
+        assert "<strong>" not in html
+        assert "color:#FF0000" not in html
 
 
 class TestPhoto:

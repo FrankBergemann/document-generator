@@ -1,14 +1,14 @@
 {
   "sections": [
     {
-      "source": "document.md",
-      "format": "md",
-      "end": "Kenntnisse"
+      "source": "cv-head.docx",
+      "format": "docx"
     },
     {
       "source": "Projektliste.docx",
       "format": "docx",
-      "begin": "Projekthistorie"
+      "begin": "Projekte",
+      "end": "Ausbildung"
     },
     {
       "source": "document.md",

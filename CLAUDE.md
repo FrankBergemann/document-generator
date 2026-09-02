@@ -326,7 +326,7 @@ and `Section.markdown` are never both populated -- keep it that way, or a stale
 paragraph will surface in whichever output format happens to prefer one over the
 other. The mechanism is [docx_import.py](src/cv_generator/docx_import.py).
 
-Three things that look arbitrary and are not:
+Four things that look arbitrary and are not:
 
 - **Without an `end`, the section's end is found by formatting, not by a style.**
   A hand-made Word CV has no `Heading 1` anywhere: its headings are bold, 12pt,
@@ -349,6 +349,20 @@ Three things that look arbitrary and are not:
   paragraphs is not the same as no section -- see
   `TestSectionBoundaries::test_a_section_of_only_blank_paragraphs_is_not_empty`
   in [tests/test_docx_import.py](tests/test_docx_import.py).
+- **A picture is read off the run, not the paragraph.** `_run_image` finds the
+  first `a:blip` under the run's own XML (`.//`, so it does not matter whether
+  the drawing is `wp:inline` or the floating `wp:anchor` -- both wrap
+  `pic:pic` the same way further down) and resolves its `r:embed` relationship
+  ID through `paragraph.part.related_parts` to the actual `ImagePart`.
+  `RichRun.image` (a `Photo` -- same shape, same `data_uri()`) is set instead
+  of text, since Word never puts both in one run; `_runs` keeps such a run
+  even though its `.text` is empty (`run.text or run.image`, not `run.text`
+  alone), and `_merge` never merges a run carrying one, since concatenating
+  its empty `text` onto a neighbour would silently keep only one of two
+  images. `render.py`/`word.py` render `RichRun.image` the same way
+  `Document.photo` already is -- an `<img>` (or, in Word, an embedded
+  picture) -- ignoring the run's text-formatting flags, which do not apply
+  to a picture.
 
 Font family, page setup and paragraph spacing are *not* imported: they stay the
 CV's own, or the projects would drag a second document's design into the document. In

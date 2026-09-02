@@ -188,6 +188,14 @@ body {
   margin-bottom: 0.1rem;
 }
 
+.cv-inline-image {
+  /* The source's own size (`wp:extent`) is not carried over, only the image
+     itself -- this is a guard against it overflowing its cell, not a layout
+     decision. */
+  max-width: 100%;
+  height: auto;
+}
+
 .cv-block-table {
   width: 100%;
   border-collapse: collapse;

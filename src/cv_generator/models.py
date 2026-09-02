@@ -76,6 +76,11 @@ class RichRun(BaseModel):
     Font *family* is deliberately absent: it is the one attribute the Document's own
     theme should keep deciding, and a Word document usually names it indirectly
     (a theme font) anyway.
+
+    ``image`` is set instead of ``text`` for a run that carries a picture
+    rather than characters -- Word never puts both in the one run. It reuses
+    :class:`Photo` rather than a type of its own: the shape (bytes plus a media
+    type) is exactly the same, and so is what a renderer does with it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -88,6 +93,7 @@ class RichRun(BaseModel):
     size_pt: float | None = None
     color: str | None = None
     link: str | None = None
+    image: Photo | None = None
 
 
 class RichParagraph(BaseModel):

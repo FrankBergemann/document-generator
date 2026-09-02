@@ -8,8 +8,6 @@ as much as the visible content.
 
 from __future__ import annotations
 
-import struct
-import zlib
 from itertools import pairwise
 from pathlib import Path
 
@@ -50,7 +48,7 @@ from cv_generator.word import (
     WordRenderer,
     WordTheme,
 )
-from tests.support import BODY_SIZE_PT, SAMPLE_PROJECTS
+from tests.support import BODY_SIZE_PT, SAMPLE_PROJECTS, png
 
 
 def write(doc: Document, tmp_path: Path, name: str = "document.docx") -> Path:
@@ -61,31 +59,6 @@ def write(doc: Document, tmp_path: Path, name: str = "document.docx") -> Path:
 
 def read(path: Path) -> WordDocument:
     return docx.Document(str(path))
-
-
-def png(width: int, height: int) -> bytes:
-    """A minimal valid PNG of exactly this pixel size.
-
-    Built by hand because the sizing rules need images of a chosen aspect ratio
-    and the project has no image library to draw one with.
-    """
-
-    def chunk(kind: bytes, payload: bytes) -> bytes:
-        return (
-            struct.pack(">I", len(payload))
-            + kind
-            + payload
-            + struct.pack(">I", zlib.crc32(kind + payload))
-        )
-
-    header = struct.pack(">2I5B", width, height, 8, 0, 0, 0, 0)  # 8-bit greyscale
-    rows = b"".join(b"\x00" + b"\xff" * width for _ in range(height))
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", header)
-        + chunk(b"IDAT", zlib.compress(rows))
-        + chunk(b"IEND", b"")
-    )
 
 
 def texts(document: WordDocument, style: str) -> list[str]:
@@ -640,6 +613,33 @@ class TestImportedBlocks:
             for row in table.rows:
                 for cell in row.cells:
                     assert cell.paragraphs
+
+
+class TestImportedImage:
+    """A picture in an imported `.docx` run (see `TestImages` in
+    test_docx_import.py) is embedded here too, the way the Document's own
+    photo already is (`TestHeaderPhoto`)."""
+
+    def test_an_image_run_is_embedded(self, tmp_path: Path) -> None:
+        photo = Photo(data=png(20, 20), media_type="image/png")
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo)])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        assert len(document.inline_shapes) == 1
+
+    def test_image_bytes_round_trip(self, tmp_path: Path) -> None:
+        data = png(20, 20)
+        photo = Photo(data=data, media_type="image/png")
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo)])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        image_part = document.inline_shapes[0]._inline.graphic.graphicData.pic.blipFill.blip
+        rid = image_part.get(qn("r:embed"))
+        assert document.part.related_parts[rid].blob == data
 
 
 def _cv_with_table(*, centered: bool, column_widths: list[float] | None = None) -> Document:

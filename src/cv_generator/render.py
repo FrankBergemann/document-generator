@@ -176,6 +176,11 @@ def _runs(runs: Sequence[RichRun]) -> str:
 
 
 def _run(run: RichRun) -> str:
+    if run.image is not None:
+        # Formatting flags (bold, colour, ...) do not apply to a picture; a
+        # link around it does, the same as around text.
+        html = f'<img class="cv-inline-image" src="{escape(run.image.data_uri())}" alt="">'
+        return f'<a href="{escape(run.link)}">{html}</a>' if run.link else html
     html = str(escape(run.text))
     if run.bold:
         html = f"<strong>{html}</strong>"

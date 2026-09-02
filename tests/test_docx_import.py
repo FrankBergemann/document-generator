@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import docx
@@ -19,6 +20,7 @@ from tests.support import (
     SAMPLE_PROJECTS,
     SPLIT_RUNS,
     SWITCHED_OFF,
+    png,
     write_projektliste,
     write_styled_docx,
 )
@@ -351,3 +353,89 @@ class TestFooter:
         texts = [block.text() for block in load_footer(path)]  # type: ignore[union-attr]
         assert "Choice text" in texts
         assert "Fallback text" not in texts
+
+
+def _top_level_runs(blocks: list[RichBlock]) -> list[RichRun]:
+    return [run for block in blocks if isinstance(block, RichParagraph) for run in block.runs]
+
+
+class TestImages:
+    """A picture in a source document -- typically a photo in an identity
+    table cell, as in the real ``cv-head.docx`` -- is read into the run that
+    carries it, not silently dropped the way a text-only run reader would drop
+    it (a picture-only run's ``text`` is empty). ``add_picture`` writes an
+    inline picture (``wp:inline``); a floating one (``wp:anchor``, what
+    ``cv-head.docx`` actually uses) wraps the same ``pic:pic`` differently, but
+    ``_run_image`` finds the ``a:blip`` either way without caring which."""
+
+    def test_an_inline_image_is_read(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        run = document.add_paragraph().add_run()
+        run.add_picture(io.BytesIO(png(20, 20)))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        image_runs = [r for r in _top_level_runs(blocks) if r.image is not None]
+        assert len(image_runs) == 1
+        assert image_runs[0].image is not None
+        assert image_runs[0].image.media_type == "image/png"
+
+    def test_an_image_run_with_no_text_is_not_dropped(self, tmp_path: Path) -> None:
+        # A picture-only run has empty `.text`; only a text-blind filter would
+        # mistake that for an empty, droppable run.
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        paragraph.add_run("Before. ")
+        picture_run = paragraph.add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)))
+        paragraph.add_run(" After.")
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        found = [r for r in _top_level_runs(blocks) if r.image is not None]
+        assert len(found) == 1
+
+    def test_image_bytes_round_trip(self, tmp_path: Path) -> None:
+        data = png(20, 20)
+        document = docx.Document()
+        run = document.add_paragraph().add_run()
+        run.add_picture(io.BytesIO(data))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        image_runs = [r for r in _top_level_runs(blocks) if r.image is not None]
+        assert image_runs[0].image is not None
+        assert image_runs[0].image.data == data
+
+    def test_an_image_in_a_table_cell_is_read(self, tmp_path: Path) -> None:
+        # The real layout: identity text in one cell, a photo in the next.
+        document = docx.Document()
+        table = document.add_table(rows=1, cols=2)
+        table.rows[0].cells[0].paragraphs[0].add_run("Ada Lovelace")
+        run = table.rows[0].cells[1].paragraphs[0].add_run()
+        run.add_picture(io.BytesIO(png(20, 20)))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        assert any(r.image is not None for r in runs(blocks))
+
+    def test_an_image_run_is_not_merged_with_a_neighbouring_text_run(self, tmp_path: Path) -> None:
+        # Merging equally-formatted neighbours (see TestFormatting) must not
+        # concatenate a picture run's (empty) text onto a plain one and lose
+        # the picture in the process.
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        paragraph.add_run("Before")
+        picture_run = paragraph.add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        paragraph_runs = _top_level_runs(blocks)
+        assert any(r.image is not None for r in paragraph_runs)
+        assert any(r.text == "Before" for r in paragraph_runs)

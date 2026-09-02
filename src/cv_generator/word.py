@@ -513,21 +513,27 @@ class WordRenderer:
         """
         link = start_hyperlink(paragraph, run.link) if run.link else None
         word_run = paragraph.add_run(run.text)
-        font = word_run.font
-        if run.bold:
-            font.bold = True
-        if run.italic:
-            font.italic = True
-        if run.underline:
-            font.underline = True
-        if run.strike:
-            font.strike = True
-        if run.size_pt is not None:
-            font.size = Pt(run.size_pt)
-        if run.color is not None:
-            font.color.rgb = RGBColor.from_string(run.color)
-        elif run.link:
-            font.color.rgb = RGBColor.from_string(self.theme.accent)
+        if run.image is not None:
+            # No text formatting applies to a picture. The source's own size
+            # (`wp:extent`) is not carried over, only the image itself -- Word
+            # picks a default size the same way it would for a pasted image.
+            word_run.add_picture(io.BytesIO(run.image.data))
+        else:
+            font = word_run.font
+            if run.bold:
+                font.bold = True
+            if run.italic:
+                font.italic = True
+            if run.underline:
+                font.underline = True
+            if run.strike:
+                font.strike = True
+            if run.size_pt is not None:
+                font.size = Pt(run.size_pt)
+            if run.color is not None:
+                font.color.rgb = RGBColor.from_string(run.color)
+            elif run.link:
+                font.color.rgb = RGBColor.from_string(self.theme.accent)
         if link is not None:
             move_run_into(word_run, link)
 

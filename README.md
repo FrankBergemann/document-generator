@@ -296,7 +296,7 @@ single Markdown file as its own header and sections, as before.
 |---|---|
 | Which part of it | From `begin` to `end`. Without an `end`, to the next paragraph formatted like the heading it started from (same weight, same size) — a hand-made Word CV has no heading *styles* to go by. Without a `begin` there is no shape to compare against either, so the span runs to the `end`, or to the last page if there is none. |
 | Zero or several files match | An error naming them. Guessing would quietly publish a CV built from last year's list. Word's `~$…` lock file never counts, so an open document does not break the build. |
-| Kept | Bold, italic, underline, strikethrough, size, colour, hyperlinks, bullets and their nesting, table columns and widths, whether the table is ruled. |
+| Kept | Bold, italic, underline, strikethrough, size, colour, hyperlinks, bullets and their nesting, table columns and widths, whether the table is ruled, and a picture a run carries (inline or floating, either way — its own size and position are not, only the image itself). |
 | Not kept | Font family, page setup, paragraph spacing — those stay the CV's own, so the imported projects sit in this document rather than importing a second design. |
 
 ### What an imported Excel range keeps

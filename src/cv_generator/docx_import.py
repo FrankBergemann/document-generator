@@ -11,8 +11,12 @@ backends.
 What "keeping the formatting" means here, precisely:
 
 * **Carried over** -- bold, italic, underline, strikethrough, font size, colour,
-  hyperlinks, bullet/number nesting, table columns and their widths, and whether
-  the table is ruled.
+  hyperlinks, bullet/number nesting, table columns and their widths, whether
+  the table is ruled, and a picture a run carries. Inline or floating
+  (``wp:inline``/``wp:anchor``) alike: only the image itself is kept, not its
+  size or its floating position, which is meaningless once flattened into
+  normal reading order the way a text box's content already is (see
+  ``_hdrftr_blocks`` below).
 * **Left to the Document's theme** -- font family, page geometry, paragraph spacing and
   the section heading itself. The imported blocks have to sit in a Document rendered
   by this project's themes, not carry a second document's page design into it.
@@ -73,7 +77,7 @@ from docx.text.run import Run
 from docx.types import ProvidesStoryPart
 
 from cv_generator.errors import DocParseError
-from cv_generator.models import RichBlock, RichCell, RichParagraph, RichRun, RichTable
+from cv_generator.models import Photo, RichBlock, RichCell, RichParagraph, RichRun, RichTable
 
 # Word's lock file for an open document: same suffix, not a document. Without
 # this, simply having the file open would turn discovery into "more than one".
@@ -407,7 +411,9 @@ def _runs(paragraph: WordParagraph) -> list[RichRun]:
                 _run(Run(element, paragraph), paragraph, url)
                 for element in child.findall(qn("w:r"))
             )
-    return [run for run in collected if run.text]
+    # A picture-only run has no `w:t` of its own, so `run.text` alone would
+    # drop it here the same way a truly empty run should be dropped.
+    return [run for run in collected if run.text or run.image]
 
 
 def _hyperlink_url(element: BaseOxmlElement, paragraph: WordParagraph) -> str | None:
@@ -431,7 +437,30 @@ def _run(run: Run, paragraph: WordParagraph, link: str | None) -> RichRun:
         size_pt=None if size is None else float(size.pt),
         color=None if color is None else str(color),
         link=link,
+        image=_run_image(run, paragraph),
     )
+
+
+def _run_image(run: Run, paragraph: WordParagraph) -> Photo | None:
+    """The picture a run carries, if any -- inline or floating, either way.
+
+    A picture sits several levels below the run: ``w:drawing`` (inline,
+    ``wp:inline``, or anchored/floating, ``wp:anchor`` -- both are read the
+    same way, since only the picture itself is kept, not its position) →
+    ``pic:pic`` → ``pic:blipFill`` → ``a:blip``, whose ``r:embed`` is the
+    relationship ID the run's own part resolves to the image part. A run
+    carries at most one; Word does not put two pictures in one run.
+    """
+    blip = run._r.find(f".//{qn('a:blip')}")
+    if blip is None:
+        return None
+    relationship_id = blip.get(qn("r:embed"))
+    if relationship_id is None:
+        return None
+    part = paragraph.part.related_parts.get(relationship_id)
+    if part is None:
+        return None
+    return Photo(data=part.blob, media_type=part.content_type)
 
 
 def _resolve(run: Run, paragraph: WordParagraph, pick: Callable[[Font], _T | None]) -> _T | None:
@@ -472,11 +501,19 @@ def _merge(runs: Sequence[RichRun]) -> list[RichRun]:
     Word splits runs at every spell-check marker and revision, so a single
     sentence can arrive as a dozen runs. Left alone they would become a dozen
     ``<span>``s or a dozen Word runs saying the same thing.
+    A run carrying a picture is never merged into or with -- concatenating its
+    ``text`` (empty) onto a neighbour would silently keep only one of the two
+    images, whichever run the merge kept.
     """
     merged: list[RichRun] = []
     for run in runs:
         previous = merged[-1] if merged else None
-        if previous is not None and _format_of(previous) == _format_of(run):
+        if (
+            previous is not None
+            and previous.image is None
+            and run.image is None
+            and _format_of(previous) == _format_of(run)
+        ):
             merged[-1] = previous.model_copy(update={"text": previous.text + run.text})
         else:
             merged.append(run)
