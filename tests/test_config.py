@@ -18,6 +18,7 @@ from tests.support import (
     BEFORE_HEADING,
     PROJEKTLISTE_NAME,
     SAMPLE_PROJECTS,
+    png,
     write_projektliste,
     write_workbook,
 )
@@ -153,6 +154,44 @@ class TestLoadConfig:
         }
         with pytest.raises(DocParseError, match="not both"):
             load_config(write_config(tmp_path, config))
+
+    def test_rejects_noframes_on_a_markdown_entry(self, tmp_path: Path) -> None:
+        config = {"sections": [{"source": "document.md", "format": "md", "noframes": True}]}
+        with pytest.raises(DocParseError, match="'noframes' only applies to format 'xlsx'"):
+            load_config(write_config(tmp_path, config))
+
+    def test_rejects_noframes_on_a_docx_entry(self, tmp_path: Path) -> None:
+        config = {
+            "sections": [{"source": "Projektliste.docx", "format": "docx", "noframes": False}]
+        }
+        with pytest.raises(DocParseError, match="'noframes' only applies to format 'xlsx'"):
+            load_config(write_config(tmp_path, config))
+
+    def test_accepts_noframes_on_an_xlsx_entry(self, tmp_path: Path) -> None:
+        config = {
+            "sections": [
+                {"source": "Rechnung.xlsx", "format": "xlsx", "noframes": True, **XLSX_RANGE}
+            ]
+        }
+        loaded = load_config(write_config(tmp_path, config))
+        assert loaded.sections[0].noframes is True
+
+    def test_noframes_is_optional_and_defaults_to_unset(self, tmp_path: Path) -> None:
+        config = {"sections": [{"source": "Rechnung.xlsx", "format": "xlsx", **XLSX_RANGE}]}
+        loaded = load_config(write_config(tmp_path, config))
+        assert loaded.sections[0].noframes is None
+
+    @pytest.mark.parametrize("spelling", ["true", "True", "TRUE", "false", "False", "FALSE"])
+    def test_noframes_accepts_case_insensitive_string_spellings(
+        self, tmp_path: Path, spelling: str
+    ) -> None:
+        config = {
+            "sections": [
+                {"source": "Rechnung.xlsx", "format": "xlsx", "noframes": spelling, **XLSX_RANGE}
+            ]
+        }
+        loaded = load_config(write_config(tmp_path, config))
+        assert loaded.sections[0].noframes is (spelling.lower() == "true")
 
 
 class TestResolveSource:
@@ -631,6 +670,28 @@ class TestXlsxSpans:
         assert section.source is not None
         assert section.source.endswith("Rechnung.xlsx")
 
+    def test_noframes_suppresses_the_source_s_own_borders(self, workbook_dir: Path) -> None:
+        # XLSX_RANGE (rows 3-5) is the ruled range write_workbook produces --
+        # see test_xlsx_import.py::TestFormatting::test_a_ruled_range_says_so.
+        doc = spans(
+            workbook_dir,
+            {"source": "Rechnung.xlsx", "format": "xlsx", "noframes": True, **XLSX_RANGE},
+        )
+        section = doc.sections[-1]
+        assert isinstance(section.blocks[0], RichTable)
+        assert section.blocks[0].bordered is False
+
+    def test_without_noframes_the_source_s_own_borders_still_apply(
+        self, workbook_dir: Path
+    ) -> None:
+        doc = spans(
+            workbook_dir,
+            {"source": "Rechnung.xlsx", "format": "xlsx", **XLSX_RANGE},
+        )
+        section = doc.sections[-1]
+        assert isinstance(section.blocks[0], RichTable)
+        assert section.blocks[0].bordered is True
+
     def test_without_a_title_no_heading_is_shown(self, workbook_dir: Path) -> None:
         # There is no `begin` heading to fall back on, unlike a `.docx` entry:
         # row and column bounds carry no heading to name the section after
@@ -1031,6 +1092,46 @@ class TestDocxHeaderFooter:
         )
         assert doc.page_header == []
         assert doc.page_footer == []
+
+    def test_a_background_image_behind_the_header_text_is_not_carried_over(
+        self, projects_dir: Path
+    ) -> None:
+        # A letterhead-style header floats its logo as a full-page background
+        # image behind the text (`wp:anchor behindDoc="1"`). Carrying it over
+        # like a real picture would blow the header up to page size and push
+        # the rest of the document onto a spurious extra page -- only the
+        # text belongs in the imported header.
+        import io
+
+        import docx
+        from docx.oxml.ns import qn
+
+        document = docx.Document()
+        document.add_paragraph("Body content.")
+        header = document.sections[0].header
+        header.is_linked_to_previous = False
+        header.paragraphs[0].text = "Header text"
+        picture_run = header.paragraphs[0].add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)))
+        drawing = picture_run._r.find(qn("w:drawing"))
+        inline = drawing.find(qn("wp:inline"))
+        inline.tag = qn("wp:anchor")
+        inline.set("behindDoc", "1")
+        inline.set("simplePos", "0")
+        path = projects_dir / "Brief.docx"
+        document.save(str(path))
+
+        doc = build(
+            projects_dir,
+            {
+                "sections": [
+                    {"source": "Brief.docx", "format": "docx"},
+                    {"source": "document.md", "format": "md"},
+                ]
+            },
+        )
+        assert doc.page_header[0].text() == "Header text"  # type: ignore[union-attr]
+        assert not any(run.image is not None for block in doc.page_header for run in block.runs)  # type: ignore[union-attr]
 
 
 class TestUnsupportedSources:

@@ -1,7 +1,7 @@
 {
   "sections": [
     {
-      "source": "Rechnung-Kopf.docx",
+      "source": "Rechnung-head.docx",
       "format": "docx"
     },
     {
@@ -10,10 +10,11 @@
       "col-start": "C",
       "col-end": "G",
       "row-start": 3,
-      "row-end": 10
+      "row-end": 10,
+      "noframes": true
     },
     {
-      "source": "Rechnung-Fuss.docx",
+      "source": "Rechnung-tail.docx",
       "format": "docx"
     }
   ],

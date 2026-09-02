@@ -113,6 +113,27 @@ class TestFormatting:
         assert isinstance(blocks[0], RichTable)
         assert blocks[0].bordered is False
 
+    def test_noframes_suppresses_borders_on_an_otherwise_ruled_range(self, workbook: Path) -> None:
+        blocks = load_section(
+            workbook, col_start="C", col_end="G", row_start=3, row_end=5, noframes=True
+        )
+        assert isinstance(blocks[0], RichTable)
+        assert blocks[0].bordered is False
+
+    def test_noframes_false_leaves_a_ruled_range_ruled(self, workbook: Path) -> None:
+        blocks = load_section(
+            workbook, col_start="C", col_end="G", row_start=3, row_end=5, noframes=False
+        )
+        assert isinstance(blocks[0], RichTable)
+        assert blocks[0].bordered is True
+
+    def test_noframes_does_not_add_borders_to_an_unruled_range(self, workbook: Path) -> None:
+        blocks = load_section(
+            workbook, col_start="C", col_end="G", row_start=5, row_end=5, noframes=False
+        )
+        assert isinstance(blocks[0], RichTable)
+        assert blocks[0].bordered is False
+
 
 class TestGeometry:
     def test_column_widths_are_the_sheet_s_own_proportions(self, table: RichTable) -> None:

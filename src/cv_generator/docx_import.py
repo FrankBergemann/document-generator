@@ -11,12 +11,16 @@ backends.
 What "keeping the formatting" means here, precisely:
 
 * **Carried over** -- bold, italic, underline, strikethrough, font size, colour,
-  hyperlinks, bullet/number nesting, table columns and their widths, whether
-  the table is ruled, and a picture a run carries. Inline or floating
+  hyperlinks, bullet/number nesting, paragraph alignment, table columns and
+  their widths, whether the table is ruled, and a picture a run carries. Inline
+  or floating
   (``wp:inline``/``wp:anchor``) alike: only the image itself is kept, not its
   size or its floating position, which is meaningless once flattened into
   normal reading order the way a text box's content already is (see
-  ``_hdrftr_blocks`` below).
+  ``_hdrftr_blocks`` below) -- except a floating picture anchored *behind* the
+  text (``behindDoc="1"``), which Word uses for decorative letterhead
+  scenery rather than content in the reading flow, and which is dropped
+  entirely (see ``_run_image``).
 * **Left to the Document's theme** -- font family, page geometry, paragraph spacing and
   the section heading itself. The imported blocks have to sit in a Document rendered
   by this project's themes, not carry a second document's page design into it.
@@ -61,7 +65,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 import docx
 from docx.document import Document as WordDocument
@@ -347,7 +351,12 @@ def _convert(block: _Block, numbering: _Numbering) -> RichBlock:
 def _paragraph(paragraph: WordParagraph, numbering: _Numbering) -> RichParagraph:
     marker = _numbering_of(paragraph)
     level, ordered = (None, False) if marker is None else numbering.describe(*marker)
-    return RichParagraph(runs=_merge(_runs(paragraph)), level=level, ordered=ordered)
+    return RichParagraph(
+        runs=_merge(_runs(paragraph)),
+        level=level,
+        ordered=ordered,
+        alignment=_alignment_of(paragraph),
+    )
 
 
 def _table(table: WordTable, numbering: _Numbering) -> RichTable:
@@ -450,9 +459,20 @@ def _run_image(run: Run, paragraph: WordParagraph) -> Photo | None:
     ``pic:pic`` → ``pic:blipFill`` → ``a:blip``, whose ``r:embed`` is the
     relationship ID the run's own part resolves to the image part. A run
     carries at most one; Word does not put two pictures in one run.
+
+    A floating picture with ``behindDoc="1"`` is excluded -- that flag is how
+    Word marks decorative letterhead artwork meant to sit behind the text as a
+    page background, not a picture in the reading flow (the real cases this
+    project imports, like a CV photo, are always in front). Such a background
+    is often sized to the whole page; flattened into an inline image the way
+    every other picture is, it would push the actual content onto a spurious
+    extra page instead of staying invisible scenery.
     """
     blip = run._r.find(f".//{qn('a:blip')}")
     if blip is None:
+        return None
+    anchor = run._r.find(f".//{qn('wp:anchor')}")
+    if anchor is not None and anchor.get("behindDoc") == "1":
         return None
     relationship_id = blip.get(qn("r:embed"))
     if relationship_id is None:
@@ -544,6 +564,43 @@ def _numbering_of(paragraph: WordParagraph) -> tuple[int, int] | None:
         if num_id is None or num_id == 0:
             return None
         return num_id, _int_val(marker.find(qn("w:ilvl"))) or 0
+    return None
+
+
+_Alignment = Literal["left", "center", "right", "justify"]
+
+# ST_Jc's own values, mapped to the four this project's themes style for.
+# "start"/"end" are the writing-direction-aware spellings newer Word versions
+# emit in place of "left"/"right"; both name the same result in a left-to-right
+# document, the only kind this project renders. Values with no equivalent here
+# (distribute, the kashida variants, ...) are deliberately left unmapped.
+_JC_VALUES: dict[str | None, _Alignment] = {
+    "left": "left",
+    "start": "left",
+    "right": "right",
+    "end": "right",
+    "center": "center",
+    "centre": "center",
+    "both": "justify",
+}
+
+
+def _alignment_of(paragraph: WordParagraph) -> _Alignment | None:
+    """The paragraph's horizontal alignment, direct then its style chain.
+
+    Mirrors :func:`_numbering_of`: a ``w:jc`` may sit on the paragraph itself
+    or on any paragraph style it inherits from (``basedOn``, nearest first).
+    ``None`` means "not set here, nor in any style it inherits" -- the same
+    "not set" :func:`_resolve` uses for run properties -- so the theme's own
+    default alignment applies, the same as an import with no ``w:jc`` at all.
+    """
+    elements = chain([paragraph._p], (style.element for style in _style_chain(paragraph.style)))
+    for element in elements:
+        properties = element.find(qn("w:pPr"))
+        jc = None if properties is None else properties.find(qn("w:jc"))
+        if jc is None:
+            continue
+        return _JC_VALUES.get(jc.get(qn("w:val")))
     return None
 
 

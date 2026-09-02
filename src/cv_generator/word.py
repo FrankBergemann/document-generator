@@ -65,6 +65,15 @@ STYLE_QUOTE = "Document Quote"
 
 CONTACT_SEPARATOR = "   ·   "
 
+# The four alignments _alignment_of (cv_generator.docx_import) recognises,
+# mapped to python-docx's own enum.
+_PARAGRAPH_ALIGNMENT = {
+    "left": WD_ALIGN_PARAGRAPH.LEFT,
+    "center": WD_ALIGN_PARAGRAPH.CENTER,
+    "right": WD_ALIGN_PARAGRAPH.RIGHT,
+    "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
+}
+
 A4_WIDTH_MM = 210.0
 A4_HEIGHT_MM = 297.0
 
@@ -500,6 +509,8 @@ class WordRenderer:
         if block.level is not None:
             style = _list_style(document, ordered=block.ordered, depth=block.level + 1)
         paragraph = target.add_paragraph(style=style)
+        if block.alignment is not None:
+            paragraph.alignment = _PARAGRAPH_ALIGNMENT[block.alignment]
         for run in block.runs:
             self._add_imported_run(paragraph, run)
 

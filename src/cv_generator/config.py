@@ -28,7 +28,11 @@ Five rules decide what a span *is*:
 * **An ``"xlsx"`` entry names a cell rectangle instead of headlines.** There are
   no headings in a spreadsheet to begin or end at, so ``col-start``, ``col-end``,
   ``row-start`` and ``row-end`` take the place of ``begin``/``end`` -- Excel's own
-  addressing, both ends inclusive, unlike the exclusive ``end`` below. See
+  addressing, both ends inclusive, unlike the exclusive ``end`` below. An
+  ``"xlsx"`` entry may also set ``noframes`` (``true``/``false``, only this
+  format) to draw its table without cell borders regardless of the source
+  workbook's own borders; left out, whether any cell in the range is ruled
+  still decides it, same as before this key existed. See
   :mod:`cv_generator.xlsx_import` for what "keeping the formatting" means for a
   spreadsheet.
 * **``begin`` and ``end`` are regular expressions matched against a headline, and
@@ -136,6 +140,15 @@ class SectionSpec(BaseModel):
     col_end: str | None = Field(default=None, alias="col-end")
     row_start: int | None = Field(default=None, alias="row-start")
     row_end: int | None = Field(default=None, alias="row-end")
+    # Whether an "xlsx" entry's table is drawn without cell borders, regardless
+    # of the borders the source workbook itself has. None (the key left out, or
+    # simply not given) means "unchanged" -- whether any cell in the range is
+    # ruled still decides it, exactly as before this key existed. A JSON boolean
+    # is the normal way to write it; pydantic also accepts the string spellings
+    # ("true"/"True"/"FALSE"/...) case-insensitively, which is where "case
+    # -insensitive" stops mattering, since JSON's own `true`/`false` literals
+    # have no case to vary.
+    noframes: bool | None = None
 
     @model_validator(mode="after")
     def _rectangle_matches_format(self) -> SectionSpec:
@@ -156,6 +169,13 @@ class SectionSpec(BaseModel):
             raise ValueError(
                 "'col-start', 'col-end', 'row-start' and 'row-end' only apply to format 'xlsx'"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _noframes_matches_format(self) -> SectionSpec:
+        """`noframes` styles the one table an "xlsx" entry produces; nothing else has one."""
+        if self.noframes is not None and self.format != "xlsx":
+            raise ValueError("'noframes' only applies to format 'xlsx'")
         return self
 
 

@@ -111,7 +111,7 @@ def _blocks(blocks: Sequence[RichBlock]) -> str:
             parts.append(_table(block))
             index += 1
         elif block.level is None:
-            parts.append(f"<p>{_runs(block.runs)}</p>")
+            parts.append(f"<p{_align_attr(block.alignment)}>{_runs(block.runs)}</p>")
             index += 1
         else:
             end = index
@@ -141,9 +141,19 @@ def _list(items: Sequence[RichParagraph], level: int = 0) -> str:
         while index < len(items) and (items[index].level or 0) > level:
             index += 1
         nested = _list(items[start:index], level + 1) if index > start else ""
-        parts.append(f"<li>{_runs(item.runs)}{nested}</li>")
+        parts.append(f"<li{_align_attr(item.alignment)}>{_runs(item.runs)}{nested}</li>")
     parts.append(f"</{tag}>")
     return "".join(parts)
+
+
+def _align_attr(alignment: str | None) -> str:
+    """A ``style="text-align:…"`` attribute, or nothing when unset.
+
+    The source's four alignment values (see :mod:`cv_generator.docx_import`)
+    are valid CSS ``text-align`` values verbatim, so no translation table is
+    needed here the way ``_run`` needs one for colour.
+    """
+    return f' style="text-align:{alignment}"' if alignment else ""
 
 
 def _table(table: RichTable) -> str:

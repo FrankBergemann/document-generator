@@ -106,6 +106,10 @@ class RichParagraph(BaseModel):
     # 0-based nesting depth of a bullet/number, or None for a plain paragraph.
     level: int | None = None
     ordered: bool = False
+    # None means "not set in the source", so the theme's own default alignment
+    # applies -- the same "not set here" as an absent `level` or `image`, not a
+    # fifth alignment value of its own.
+    alignment: Literal["left", "center", "right", "justify"] | None = None
 
     def text(self) -> str:
         return "".join(run.text for run in self.runs)

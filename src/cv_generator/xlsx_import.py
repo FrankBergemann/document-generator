@@ -15,7 +15,10 @@ split it at, the same reason a ``.docx`` import is one section.
 What "keeping the formatting" means here:
 
 * **Carried over** -- bold, italic, underline, strikethrough, font size, whether
-  any cell in the range is ruled, and the sheet's own column widths.
+  any cell in the range is ruled, and the sheet's own column widths. Whether the
+  range is ruled can also be overridden from the recipe (``noframes``, see
+  :class:`cv_generator.config.SectionSpec`) to draw the table without cell
+  borders regardless of what the workbook itself has.
 * **Left to the Document's theme** -- font family and everything about page layout, the
   same split the ``.docx`` import makes and for the same reason: the imported
   range has to sit in a document rendered by this project's themes, not carry a
@@ -71,7 +74,13 @@ _CURRENCY_SYMBOLS = ("€", "$", "£")
 
 
 def load_section(
-    path: Path, *, col_start: str, col_end: str, row_start: int, row_end: int
+    path: Path,
+    *,
+    col_start: str,
+    col_end: str,
+    row_start: int,
+    row_end: int,
+    noframes: bool = False,
 ) -> list[RichBlock]:
     """Import the rectangle from ``col_start``/``row_start`` to ``col_end``/``row_end``.
 
@@ -81,6 +90,12 @@ def load_section(
         col_end: The last column, inclusive.
         row_start: The first row, 1-based.
         row_end: The last row, inclusive.
+        noframes: Forces :attr:`RichTable.bordered` to ``False`` regardless of
+            the source's own cell borders -- the recipe's way to draw the
+            table without frame lines even though the workbook itself is
+            ruled. ``False`` (the default) leaves the existing "ruled if any
+            cell in the range is" reading in place; it can only ever suppress
+            borders, never add them to an unruled range.
 
     Returns:
         A single-element list holding one :class:`RichTable` -- always one,
@@ -106,7 +121,7 @@ def load_section(
     )
     table = RichTable(
         rows=[[_cell(cell) for cell in row] for row in grid],
-        bordered=any(_is_bordered(cell) for row in grid for cell in row),
+        bordered=False if noframes else any(_is_bordered(cell) for row in grid for cell in row),
         column_widths=_column_widths(sheet, first_col, last_col),
         # A spreadsheet range is not meant to fill the page the way an imported
         # Word section is; it reads more like a figure set into the document, so

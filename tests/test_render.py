@@ -229,6 +229,25 @@ class TestImportedImage:
         assert "color:#FF0000" not in html
 
 
+class TestParagraphAlignment:
+    """A paragraph's ``jc`` (see ``TestAlignment`` in test_docx_import.py)
+    becomes a ``text-align`` declaration -- the four values the model carries
+    are valid CSS verbatim, so no translation table is needed here."""
+
+    def test_a_right_aligned_paragraph_gets_the_style(self) -> None:
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="x")], alignment="right")])
+        assert '<p style="text-align:right">x</p>' in html
+
+    def test_an_unset_alignment_adds_no_style_attribute(self) -> None:
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="x")])])
+        assert "<p>x</p>" in html
+        assert "text-align" not in html
+
+    def test_a_right_aligned_list_item_gets_the_style(self) -> None:
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="x")], level=0, alignment="right")])
+        assert '<li style="text-align:right">x</li>' in html
+
+
 class TestPhoto:
     def test_photo_is_embedded_not_linked(
         self, renderer: Renderer, photo_document: Document

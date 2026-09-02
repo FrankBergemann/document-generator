@@ -452,6 +452,7 @@ def _copy_xlsx(spec: SectionSpec, path: Path, slug_for: _Slugger, *, source: str
             col_end=spec.col_end,
             row_start=spec.row_start,
             row_end=spec.row_end,
+            noframes=bool(spec.noframes),
         )
     except DocParseError as exc:
         raise DocParseError(f"{source}: {exc}") from exc

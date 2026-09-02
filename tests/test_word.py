@@ -377,6 +377,16 @@ class TestPageHeader:
         run = document.sections[-1].header.paragraphs[0].runs[0]
         assert run.bold is True
 
+    def test_page_header_alignment_is_preserved(self, tmp_path: Path) -> None:
+        # A letterhead-style header commonly right-aligns its identity block --
+        # dropping that turned "flush right" into "flush left" in the output.
+        doc = Document(
+            page_header=[RichParagraph(runs=[RichRun(text="Right header")], alignment="right")]
+        )
+        document = read(write(doc, tmp_path))
+        paragraph = document.sections[-1].header.paragraphs[0]
+        assert paragraph.alignment == WD_ALIGN_PARAGRAPH.RIGHT
+
 
 class TestPageFooter:
     def test_page_footer_content_is_written(self, tmp_path: Path) -> None:

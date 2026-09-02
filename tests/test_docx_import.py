@@ -5,8 +5,10 @@ from pathlib import Path
 
 import docx
 import pytest
+from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
+from docx.oxml.ns import nsdecls, qn
 
 from cv_generator.docx_import import load_footer, load_section
 from cv_generator.errors import DocParseError
@@ -217,6 +219,78 @@ class TestFormatting:
         assert [(run.text, run.link) for run in linked] == [
             ("Projektseite", "https://example.org/projekt")
         ]
+
+
+class TestAlignment:
+    """A letterhead-style header commonly right-aligns its identity block
+    (``w:jc``) -- dropping it turns "flush right" into "flush left", the same
+    class of bug as dropping bold. See :func:`cv_generator.docx_import._alignment_of`."""
+
+    def test_a_paragraph_s_own_alignment_is_read(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        paragraph = document.add_paragraph("Right-aligned")
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        assert isinstance(blocks[0], RichParagraph)
+        assert blocks[0].alignment == "right"
+
+    def test_no_jc_at_all_leaves_alignment_unset(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        document.add_paragraph("Plain")
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        assert isinstance(blocks[0], RichParagraph)
+        assert blocks[0].alignment is None
+
+    def test_alignment_inherited_from_the_paragraph_style_is_read(self, tmp_path: Path) -> None:
+        # Word's own header/footer letterhead paragraphs often carry their
+        # jc on the style rather than directly -- the same "style, not the
+        # paragraph" case _numbering_of already has to handle for bullets.
+        document = docx.Document()
+        style = document.styles.add_style("RightStyle", WD_STYLE_TYPE.PARAGRAPH)
+        style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        document.add_paragraph("Styled", style=style)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        assert isinstance(blocks[0], RichParagraph)
+        assert blocks[0].alignment == "right"
+
+    def test_a_direct_alignment_overrides_the_style_s(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        style = document.styles.add_style("RightStyle2", WD_STYLE_TYPE.PARAGRAPH)
+        style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        paragraph = document.add_paragraph("Overridden", style=style)
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        assert isinstance(blocks[0], RichParagraph)
+        assert blocks[0].alignment == "center"
+
+    def test_an_alignment_this_project_does_not_style_for_is_left_unset(
+        self, tmp_path: Path
+    ) -> None:
+        # ST_Jc has values beyond the four CSS/Word alignments this project's
+        # themes style for (distribute, the kashida variants, ...) -- an
+        # explicit but unsupported value falls through to None rather than
+        # guessing, the same as any other "not set here".
+        document = docx.Document()
+        paragraph = document.add_paragraph("Distributed")
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.DISTRIBUTE
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        assert isinstance(blocks[0], RichParagraph)
+        assert blocks[0].alignment is None
 
 
 class TestLists:
@@ -438,4 +512,28 @@ class TestImages:
         blocks = load_section(path)
         paragraph_runs = _top_level_runs(blocks)
         assert any(r.image is not None for r in paragraph_runs)
+        assert any(r.text == "Before" for r in paragraph_runs)
+
+    def test_a_picture_anchored_behind_the_text_is_not_imported(self, tmp_path: Path) -> None:
+        # A letterhead-style header commonly floats a full-page background
+        # image behind the text (`wp:anchor behindDoc="1"`) -- Word shows it
+        # as page scenery. Importing it like any other picture would flatten
+        # it into an inline image the size of a full page, pushing real
+        # content onto a spurious extra page.
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        paragraph.add_run("Before")
+        picture_run = paragraph.add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)))
+        drawing = picture_run._r.find(qn("w:drawing"))
+        inline = drawing.find(qn("wp:inline"))
+        inline.tag = qn("wp:anchor")
+        inline.set("behindDoc", "1")
+        inline.set("simplePos", "0")
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        paragraph_runs = _top_level_runs(blocks)
+        assert not any(r.image is not None for r in paragraph_runs)
         assert any(r.text == "Before" for r in paragraph_runs)
