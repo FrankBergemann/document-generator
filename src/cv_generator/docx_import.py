@@ -379,8 +379,21 @@ def _table(table: WordTable, numbering: _Numbering) -> RichTable:
     )
 
 
+_BOX_EDGES = {qn("w:top"), qn("w:left"), qn("w:bottom"), qn("w:right")}
+
+
 def _is_bordered(table: WordTable) -> bool:
-    """Whether the table draws lines, from its own properties or its style."""
+    """Whether the table is framed by a full box of lines, from its own
+    properties or its style.
+
+    A table can carry a single decorative rule -- the header table's own
+    ``tblBorders`` sets only ``w:bottom``, the line under the identity block --
+    without looking, in Word, anything like a bordered table. What this flag
+    renders is a full box round every cell (``Table Grid`` in Word output,
+    ``.cv-block-table--ruled`` in HTML), so it must require all four outer
+    edges, not merely one of them -- otherwise a lone rule the source document
+    never framed as a table gets rendered as one.
+    """
     elements = chain([table._tbl.tblPr], (style.element for style in _style_chain(table.style)))
     for element in elements:
         if element is None:
@@ -389,7 +402,10 @@ def _is_bordered(table: WordTable) -> bool:
         borders = None if properties is None else properties.find(qn("w:tblBorders"))
         if borders is None:
             continue
-        return any(edge.get(qn("w:val")) not in (None, "none", "nil") for edge in borders)
+        present = {
+            edge.tag for edge in borders if edge.get(qn("w:val")) not in (None, "none", "nil")
+        }
+        return _BOX_EDGES.issubset(present)
     return False
 
 
