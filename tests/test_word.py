@@ -18,6 +18,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml.ns import qn
+from docx.shared import Cm, Emu
 from docx.table import Table
 
 from cv_generator.errors import RenderError
@@ -650,6 +651,133 @@ class TestImportedImage:
         image_part = document.inline_shapes[0]._inline.graphic.graphicData.pic.blipFill.blip
         rid = image_part.get(qn("r:embed"))
         assert document.part.related_parts[rid].blob == data
+
+    def test_a_known_source_size_is_reproduced(self, tmp_path: Path) -> None:
+        # A 20x20-pixel bitmap carrying the 3cm x 4cm display size the source
+        # document showed it at -- `add_picture`'s own default (the bitmap's
+        # native size at 96dpi) would be a tiny fraction of that.
+        photo = Photo(data=png(20, 20), media_type="image/png", width_emu=Cm(3), height_emu=Cm(4))
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo)])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        shape = document.inline_shapes[0]
+        assert shape.width == Cm(3)
+        assert shape.height == Cm(4)
+
+    def test_an_unknown_source_size_falls_back_to_the_bitmap_s_own(self, tmp_path: Path) -> None:
+        photo = Photo(data=png(20, 20), media_type="image/png")
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo)])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        shape = document.inline_shapes[0]
+        # Whatever `add_picture` computes on its own (72dpi, absent other
+        # metadata in this hand-built PNG) for a 20x20-pixel bitmap -- the
+        # point is only that *some* fallback still applies, not this project's
+        # own choice of size.
+        assert shape.width == shape.height == Emu(254000)
+
+
+class TestImportedImageCrop:
+    """``Photo.crop_left``/``crop_top``/``crop_right``/``crop_bottom`` (see
+    ``TestImageCrop`` in test_docx_import.py) become an ``a:srcRect`` on the
+    embedded picture, Word's own crop record -- there is no read API for it,
+    so assertions go through the raw XML the same way a hyperlink's does."""
+
+    def test_a_crop_is_written_as_src_rect(self, tmp_path: Path) -> None:
+        photo = Photo(
+            data=png(20, 20),
+            media_type="image/png",
+            crop_left=0.1,
+            crop_top=0.2,
+            crop_right=0.05,
+            crop_bottom=0.25,
+        )
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo)])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        src_rect = document.element.body.find(f".//{qn('a:srcRect')}")
+        assert src_rect is not None
+        assert src_rect.get("l") == "10000"
+        assert src_rect.get("t") == "20000"
+        assert src_rect.get("r") == "5000"
+        assert src_rect.get("b") == "25000"
+
+    def test_an_uncropped_picture_has_no_src_rect(self, tmp_path: Path) -> None:
+        photo = Photo(data=png(20, 20), media_type="image/png")
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo)])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        assert document.element.body.find(f".//{qn('a:srcRect')}") is None
+
+
+class TestImportedImageFloat:
+    """``RichRun.float_side`` (see ``TestFloatingImagePosition`` in
+    test_docx_import.py) turns the embedded picture from an inline
+    ``wp:inline`` into a floating ``wp:anchor`` -- so it drops out of
+    ``document.inline_shapes`` (which only enumerates ``wp:inline``
+    pictures), and assertions go through the raw XML instead, the same as a
+    hyperlink's."""
+
+    def test_a_floating_run_is_no_longer_an_inline_shape(self, tmp_path: Path) -> None:
+        photo = Photo(data=png(20, 20), media_type="image/png")
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo, float_side="left")])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        assert len(document.inline_shapes) == 0
+
+    def test_a_floating_run_becomes_an_anchor_aligned_to_its_side(self, tmp_path: Path) -> None:
+        photo = Photo(data=png(20, 20), media_type="image/png")
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo, float_side="right")])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        anchor = document.element.body.find(f".//{qn('wp:anchor')}")
+        assert anchor is not None
+        position_h = anchor.find(qn("wp:positionH"))
+        assert position_h is not None
+        align = position_h.find(qn("wp:align"))
+        assert align is not None
+        assert align.text == "right"
+
+    def test_a_non_floating_run_stays_an_inline_shape(self, tmp_path: Path) -> None:
+        photo = Photo(data=png(20, 20), media_type="image/png")
+        paragraph = RichParagraph(runs=[RichRun(text="", image=photo)])
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        assert len(document.inline_shapes) == 1
+        assert document.element.body.find(f".//{qn('wp:anchor')}") is None
+
+    def test_two_floating_pictures_get_distinct_z_order(self, tmp_path: Path) -> None:
+        # `relativeHeight` should not collide between two floating pictures in
+        # the same Document -- see ooxml.py::float_picture.
+        photo = Photo(data=png(20, 20), media_type="image/png")
+        paragraph = RichParagraph(
+            runs=[
+                RichRun(text="", image=photo, float_side="left"),
+                RichRun(text="", image=photo, float_side="right"),
+            ]
+        )
+        section = Section(title="Kenntnisse", slug="kenntnisse", markdown="", blocks=[paragraph])
+        doc = Document(name="Ada", sections=[section])
+
+        document = read(write(doc, tmp_path))
+        anchors = document.element.body.findall(f".//{qn('wp:anchor')}")
+        assert len(anchors) == 2
+        heights = {anchor.get("relativeHeight") for anchor in anchors}
+        assert len(heights) == 2
 
 
 def _cv_with_table(*, centered: bool, column_widths: list[float] | None = None) -> Document:

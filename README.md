@@ -15,6 +15,7 @@ Every command this project asks you to type is a script in [run/](run/), with a
 |---|---|
 | [run/setup.sh](run/setup.sh) | Editable install with the dev extra; `--pdf` adds a local Chromium |
 | [run/build.sh](run/build.sh) | Render the CV — every format, or `-f html\|pdf\|docx` (`-o`, `-t`, …) |
+| [run/convertToPDF.sh](run/convertToPDF.sh) | Convert one existing `.docx` file to a `.pdf` beside it |
 | [run/validate.sh](run/validate.sh) | Assemble and report which file fed which section, write nothing |
 | [run/themes.sh](run/themes.sh) | List HTML/PDF themes |
 | [run/engines.sh](run/engines.sh) | PDF engine status, including the browser server |

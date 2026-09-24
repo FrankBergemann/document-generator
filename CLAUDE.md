@@ -317,6 +317,9 @@ assembly. A `sections` entry copies one span of one file:
   document.
 - **Slugs are deduplicated across the whole document** (`_Slugger`), not per
   file. Two sources easily use the same heading, and slugs are the HTML anchors.
+- **`postprocessing` is a list of text substitutions, run against the finished
+  Document after every section is copied in.** See
+  [Postprocessing](#postprocessing) below.
 
 ## Imported Word sections
 
@@ -465,6 +468,41 @@ is: `write_workbook` in [tests/support.py](tests/support.py) writes a workbook
 with a bold, ruled header row and one data row (a date, a plain number, a
 currency figure), plus content just outside the rectangle every test asks for —
 the negative control for "the importer respected the corners it was given".
+
+## Postprocessing
+
+A recipe's `postprocessing` list ([config.py](src/cv_generator/config.py)'s
+`PostprocessingStep`) names text substitutions run against the *assembled*
+Document, in [postprocessing.py](src/cv_generator/postprocessing.py) --
+`build_doc` calls it last, after every section is copied in and before any
+output format is rendered, so a substitution shows up in `.html`, `.docx` and
+`.pdf` alike instead of being patched into one format after the fact.
+
+The one step implemented is `set-invoice-amount`, named after its own on/off
+switch (a step with the switch off is skipped, not removed -- that is what
+makes it a switch rather than the entry's mere presence). Given `pattern` (a
+sentence), `old` (a placeholder inside it), and `cell` (the label of a table
+cell from *any* imported `.docx`/`.xlsx` section -- there is no separate
+notion of "the xlsx source" once sections are assembled into one Document, so
+this is exactly the table an `xlsx` entry's cell rectangle became): it finds
+the one table cell containing `cell`, takes the text of the cell to its
+right, and replaces `old` with that text everywhere `pattern` occurs whole --
+inside a section's Markdown, or inside a single imported run. `old` not being
+part of `pattern`, `cell` matching zero or several cells, the matched cell
+having nothing to its right, or `pattern` not occurring anywhere in the
+Document are all `DocParseError`, same as a `begin`/`end` that names no
+heading -- a recipe mistake here would otherwise silently ship a real
+document with a placeholder amount still in it.
+
+`new` is accepted (`extra="forbid"` demands it) but not read by the step --
+it documents, for a human reading the recipe, where the replacement comes
+from; the value itself is always computed from `cell`.
+
+A sentence split across two differently-formatted runs by the source
+document's own formatting is *not* reassembled to search across the split --
+`pattern` has to sit whole inside one run (or one section's Markdown) to be
+found. That covers a plain sentence in a Word paragraph, which is this
+project's own use of the step and not usually split that way.
 
 ## Word output specifics
 

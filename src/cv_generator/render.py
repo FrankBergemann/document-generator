@@ -13,15 +13,20 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound, select_autoescape
 from markupsafe import Markup, escape
 
 from cv_generator.errors import RenderError
 from cv_generator.markdown import to_html
-from cv_generator.models import Document, RichBlock, RichParagraph, RichRun, RichTable
+from cv_generator.models import Document, Photo, RichBlock, RichParagraph, RichRun, RichTable
 
 BUILTIN_TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+# EMU (English Metric Units, what `wp:extent` is in) per CSS reference pixel:
+# 914400 EMU/inch ÷ 96 px/inch.
+_EMU_PER_PX = 9525
 
 TEMPLATE_NAME = "document.html.j2"
 STYLESHEET_NAME = "document.css"
@@ -185,11 +190,68 @@ def _runs(runs: Sequence[RichRun]) -> str:
     return "".join(_run(run) for run in runs)
 
 
+def _image_size_style(photo: Photo) -> str:
+    """A ``width``/``aspect-ratio`` declaration from the source's own display size.
+
+    Empty when the source had none (the Document's own identity photo, sized by
+    the theme instead -- see :class:`~cv_generator.models.Photo`), which leaves
+    ``.cv-inline-image``'s own rules -- natural size, capped by ``max-width`` --
+    exactly as before this existed. ``aspect-ratio`` matters as much as
+    ``width`` here: ``.cv-inline-image``'s ``max-width:100%`` still has to be
+    able to shrink an image wider than its cell, and doing that through
+    ``height:auto`` alone would derive the height from the embedded bitmap's
+    own pixel dimensions -- usually a different, larger picture than the
+    source actually showed -- instead of from the extent being set here.
+    """
+    if photo.width_emu is None or photo.height_emu is None:
+        return ""
+    width_px = photo.width_emu / _EMU_PER_PX
+    return f' style="width:{width_px:.4g}px;aspect-ratio:{photo.width_emu}/{photo.height_emu}"'
+
+
+def _is_cropped(photo: Photo) -> bool:
+    return bool(photo.crop_left or photo.crop_top or photo.crop_right or photo.crop_bottom)
+
+
+def _image_html(photo: Photo, float_side: Literal["left", "right"] | None) -> str:
+    """An imported picture, at its source size and (if cropped) crop.
+
+    An uncropped picture is a plain ``<img>``: ``.cv-inline-image`` already
+    handles its size (see ``_image_size_style``). A cropped one needs a wrapper
+    ``<span>`` sized to the *cropped* box, ``overflow: hidden``, holding an
+    ``<img>`` sized and positioned (in percent, so it shrinks with the wrapper
+    -- see ``.cv-inline-image--cropped`` in document.css) to show only the
+    remainder Word's own crop tool kept -- CSS has no property for "show only
+    this rectangle of an image", so this is the same trick as an
+    object-position/object-fit crop, spelled out by hand for browsers this
+    project's PDF engine is old enough to still need it spelled out for.
+    """
+    classes = "cv-inline-image"
+    if float_side is not None:
+        classes += f" cv-inline-image--float-{float_side}"
+    style = _image_size_style(photo)
+    src = escape(photo.data_uri())
+    if not _is_cropped(photo):
+        return f'<img class="{classes}"{style} src="{src}" alt="">'
+    scale_w = max(1e-6, 1 - photo.crop_left - photo.crop_right)
+    scale_h = max(1e-6, 1 - photo.crop_top - photo.crop_bottom)
+    # `+ 0.0` folds a `-0.0` (an uncropped edge on an otherwise-cropped axis,
+    # `-100 * 0.0`) back to plain `0`, which is what a reader expects to see
+    # in the declaration -- `-0%` would be correct CSS but look like a typo.
+    left = -100 * photo.crop_left / scale_w + 0.0
+    top = -100 * photo.crop_top / scale_h + 0.0
+    inner_style = (
+        f"width:{100 / scale_w:.4g}%;height:{100 / scale_h:.4g}%;left:{left:.4g}%;top:{top:.4g}%"
+    )
+    inner = f'<img style="{inner_style}" src="{src}" alt="">'
+    return f'<span class="{classes} cv-inline-image--cropped"{style}>{inner}</span>'
+
+
 def _run(run: RichRun) -> str:
     if run.image is not None:
         # Formatting flags (bold, colour, ...) do not apply to a picture; a
         # link around it does, the same as around text.
-        html = f'<img class="cv-inline-image" src="{escape(run.image.data_uri())}" alt="">'
+        html = _image_html(run.image, run.float_side)
         return f'<a href="{escape(run.link)}">{html}</a>' if run.link else html
     html = str(escape(run.text))
     if run.bold:

@@ -228,6 +228,80 @@ class TestImportedImage:
         assert "<strong>" not in html
         assert "color:#FF0000" not in html
 
+    def test_an_image_with_a_known_size_gets_a_width_and_aspect_ratio(self) -> None:
+        # 914400 EMU/inch, 96 CSS px/inch -> 3in wide is 288px; 3in x 1.5in is
+        # a 2:1 aspect ratio, independent of whatever the bitmap's own pixel
+        # dimensions happen to be (the point of carrying `wp:extent` at all).
+        photo = Photo(
+            data=b"\x89PNG\r\n\x1a\n",
+            media_type="image/png",
+            width_emu=914400 * 3,
+            height_emu=914400 * 3 // 2,
+        )
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="", image=photo)])])
+        assert 'style="width:288px;aspect-ratio:2743200/1371600"' in html
+
+    def test_an_image_with_no_known_size_gets_no_style_attribute(self) -> None:
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="", image=photo)])])
+        assert '<img class="cv-inline-image" src=' in html
+        assert "style=" not in html
+
+    def test_a_floating_image_gets_a_float_side_class(self) -> None:
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        run = RichRun(text="", image=photo, float_side="left")
+        html = blocks_to_html([RichParagraph(runs=[run])])
+        assert '<img class="cv-inline-image cv-inline-image--float-left"' in html
+
+    def test_a_non_floating_image_gets_no_float_class(self) -> None:
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="", image=photo)])])
+        assert "cv-inline-image--float" not in html
+
+    def test_a_cropped_image_becomes_a_clipped_wrapper(self) -> None:
+        # A crop has no CSS property of its own (see render.py::_image_html):
+        # the outer element is sized to the *cropped* box, and the inner
+        # picture is scaled up and shifted so only the remainder shows.
+        photo = Photo(
+            data=b"\x89PNG\r\n\x1a\n",
+            media_type="image/png",
+            width_emu=914400,
+            height_emu=914400,
+            crop_left=0.25,
+        )
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="", image=photo)])])
+        assert '<span class="cv-inline-image cv-inline-image--cropped"' in html
+        # scale_w = 1 - 0.25 = 0.75 -> inner width 133.3%, left offset -33.33%
+        assert "width:133.3%" in html
+        assert "left:-33.33%" in html
+        # No crop on the vertical axis: full height, no vertical offset.
+        assert "height:100%" in html
+        assert "top:0%" in html
+
+    def test_an_uncropped_image_is_a_plain_img_not_a_wrapper(self) -> None:
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png")
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="", image=photo)])])
+        assert "cv-inline-image--cropped" not in html
+        assert "<span" not in html
+
+    def test_a_cropped_floating_image_gets_both_classes(self) -> None:
+        photo = Photo(
+            data=b"\x89PNG\r\n\x1a\n",
+            media_type="image/png",
+            crop_top=0.1,
+        )
+        run = RichRun(text="", image=photo, float_side="right")
+        html = blocks_to_html([RichParagraph(runs=[run])])
+        assert (
+            'class="cv-inline-image cv-inline-image--float-right cv-inline-image--cropped"' in html
+        )
+
+    def test_a_cropped_linked_image_is_still_wrapped_in_an_anchor(self) -> None:
+        photo = Photo(data=b"\x89PNG\r\n\x1a\n", media_type="image/png", crop_right=0.5)
+        run = RichRun(text="", image=photo, link="https://example.com")
+        html = blocks_to_html([RichParagraph(runs=[run])])
+        assert '<a href="https://example.com"><span class="cv-inline-image' in html
+
 
 class TestParagraphAlignment:
     """A paragraph's ``jc`` (see ``TestAlignment`` in test_docx_import.py)

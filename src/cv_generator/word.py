@@ -44,10 +44,12 @@ from cv_generator.models import (
 from cv_generator.ooxml import (
     add_bottom_border,
     add_table_bottom_border,
+    float_picture,
     move_run_into,
     remove_paragraph,
     set_column_widths,
     set_language,
+    set_picture_crop,
     set_table_cell_margins,
     start_hyperlink,
 )
@@ -525,10 +527,28 @@ class WordRenderer:
         link = start_hyperlink(paragraph, run.link) if run.link else None
         word_run = paragraph.add_run(run.text)
         if run.image is not None:
-            # No text formatting applies to a picture. The source's own size
-            # (`wp:extent`) is not carried over, only the image itself -- Word
-            # picks a default size the same way it would for a pasted image.
-            word_run.add_picture(io.BytesIO(run.image.data))
+            # No text formatting applies to a picture. `width`/`height_emu` are
+            # the size the source document displayed it at (`wp:extent`) --
+            # given explicitly, or `add_picture` would fall back to the
+            # embedded bitmap's own pixel size at 96dpi, usually a much larger
+            # picture than the source actually showed.
+            image = run.image
+            if image.width_emu is not None and image.height_emu is not None:
+                word_run.add_picture(
+                    io.BytesIO(image.data), width=Emu(image.width_emu), height=Emu(image.height_emu)
+                )
+            else:
+                word_run.add_picture(io.BytesIO(image.data))
+            if image.crop_left or image.crop_top or image.crop_right or image.crop_bottom:
+                set_picture_crop(
+                    word_run,
+                    left=image.crop_left,
+                    top=image.crop_top,
+                    right=image.crop_right,
+                    bottom=image.crop_bottom,
+                )
+            if run.float_side is not None:
+                float_picture(word_run, side=run.float_side)
         else:
             font = word_run.font
             if run.bold:

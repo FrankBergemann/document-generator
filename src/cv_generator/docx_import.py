@@ -12,15 +12,18 @@ What "keeping the formatting" means here, precisely:
 
 * **Carried over** -- bold, italic, underline, strikethrough, font size, colour,
   hyperlinks, bullet/number nesting, paragraph alignment, table columns and
-  their widths, whether the table is ruled, and a picture a run carries. Inline
-  or floating
-  (``wp:inline``/``wp:anchor``) alike: only the image itself is kept, not its
-  size or its floating position, which is meaningless once flattened into
-  normal reading order the way a text box's content already is (see
-  ``_hdrftr_blocks`` below) -- except a floating picture anchored *behind* the
-  text (``behindDoc="1"``), which Word uses for decorative letterhead
-  scenery rather than content in the reading flow, and which is dropped
-  entirely (see ``_run_image``).
+  their widths, whether the table is ruled, and a picture a run carries,
+  including the size Word displayed it at (``wp:extent``) and any crop
+  (``a:srcRect``, see ``_crop_fractions``). A *floating* picture
+  (``wp:anchor``) that Word wraps text around (square/tight/through) and
+  positions with a plain left/right keyword also keeps that -- text still
+  flows around it, the one floating placement that still means the same thing
+  once flattened into normal reading order (see ``_float_side``). A floating
+  picture positioned by a raw offset instead of a keyword, or not wrapped at
+  all, is flattened into the reading order in place, same as an inline
+  picture -- and one anchored *behind* the text (``behindDoc="1"``), which
+  Word uses for decorative letterhead scenery rather than content in the
+  reading flow, is dropped entirely (see ``_run_image``).
 * **Left to the Document's theme** -- font family, page geometry, paragraph spacing and
   the section heading itself. The imported blocks have to sit in a Document rendered
   by this project's themes, not carry a second document's page design into it.
@@ -453,6 +456,7 @@ def _hyperlink_url(element: BaseOxmlElement, paragraph: WordParagraph) -> str | 
 def _run(run: Run, paragraph: WordParagraph, link: str | None) -> RichRun:
     size = _resolve(run, paragraph, lambda font: font.size)
     color = _resolve(run, paragraph, lambda font: font.color.rgb)
+    image = _run_image(run, paragraph)
     return RichRun(
         text=run.text,
         bold=bool(_resolve(run, paragraph, lambda font: font.bold)),
@@ -462,7 +466,8 @@ def _run(run: Run, paragraph: WordParagraph, link: str | None) -> RichRun:
         size_pt=None if size is None else float(size.pt),
         color=None if color is None else str(color),
         link=link,
-        image=_run_image(run, paragraph),
+        image=image,
+        float_side=_float_side(run) if image is not None else None,
     )
 
 
@@ -471,10 +476,12 @@ def _run_image(run: Run, paragraph: WordParagraph) -> Photo | None:
 
     A picture sits several levels below the run: ``w:drawing`` (inline,
     ``wp:inline``, or anchored/floating, ``wp:anchor`` -- both are read the
-    same way, since only the picture itself is kept, not its position) →
-    ``pic:pic`` → ``pic:blipFill`` → ``a:blip``, whose ``r:embed`` is the
-    relationship ID the run's own part resolves to the image part. A run
-    carries at most one; Word does not put two pictures in one run.
+    same way here, since the size and crop this returns do not depend on
+    which one wraps the picture; ``_float_side`` is what reads ``wp:anchor``
+    for the run's floating position, separately) → ``pic:pic`` →
+    ``pic:blipFill`` → ``a:blip``, whose ``r:embed`` is the relationship ID
+    the run's own part resolves to the image part. A run carries at most one;
+    Word does not put two pictures in one run.
 
     A floating picture with ``behindDoc="1"`` is excluded -- that flag is how
     Word marks decorative letterhead artwork meant to sit behind the text as a
@@ -496,7 +503,101 @@ def _run_image(run: Run, paragraph: WordParagraph) -> Photo | None:
     part = paragraph.part.related_parts.get(relationship_id)
     if part is None:
         return None
-    return Photo(data=part.blob, media_type=part.content_type)
+    width_emu, height_emu = _image_extent(run)
+    crop_left, crop_top, crop_right, crop_bottom = _crop_fractions(blip)
+    return Photo(
+        data=part.blob,
+        media_type=part.content_type,
+        width_emu=width_emu,
+        height_emu=height_emu,
+        crop_left=crop_left,
+        crop_top=crop_top,
+        crop_right=crop_right,
+        crop_bottom=crop_bottom,
+    )
+
+
+def _image_extent(run: Run) -> tuple[int | None, int | None]:
+    """The size (EMU, 914400 per inch) Word displayed the run's picture at.
+
+    ``wp:extent`` is a required child of both ``wp:inline`` and ``wp:anchor``,
+    a sibling of the ``pic:pic`` chain ``_run_image`` reads the bytes from, so
+    it is found the same way regardless of which wraps this run's picture:
+    searched for under the whole run rather than under one specific ancestor.
+    This is the size the source document actually *showed* the picture at --
+    almost always smaller than the embedded bitmap's own pixel dimensions,
+    which is why leaving this unset would size the image off the wrong thing.
+    """
+    extent = run._r.find(f".//{qn('wp:extent')}")
+    if extent is None:
+        return None, None
+    cx, cy = extent.get("cx"), extent.get("cy")
+    if cx is None or cy is None:
+        return None, None
+    return int(cx), int(cy)
+
+
+def _crop_fractions(blip: BaseOxmlElement) -> tuple[float, float, float, float]:
+    """How much of the picture's own bitmap Word's crop tool hid, per edge.
+
+    ``a:srcRect``, a sibling of ``a:blip`` inside ``pic:blipFill``, is Word's
+    own record of a crop: ``l``/``t``/``r``/``b``, each a fraction of that edge
+    hidden, in thousandths of a percent (100000 is 100%). All zero -- not
+    cropped -- when the picture has no ``a:srcRect`` at all, or an edge the
+    element does not carry (each is individually optional, 0 when absent).
+
+    Left uncropped, ``width_emu``/``height_emu`` alone would size the *whole*
+    bitmap into the box the source only showed a cropped remainder of --
+    stretching the parts Word's own crop tool hid back into view, and
+    distorting the parts it kept, since a remainder cropped from a rectangle
+    of one aspect ratio does not generally share the box's own.
+    """
+    blip_fill = blip.getparent()
+    src_rect = None if blip_fill is None else blip_fill.find(qn("a:srcRect"))
+    if src_rect is None:
+        return 0.0, 0.0, 0.0, 0.0
+    left = int(src_rect.get("l", "0")) / 100000
+    top = int(src_rect.get("t", "0")) / 100000
+    right = int(src_rect.get("r", "0")) / 100000
+    bottom = int(src_rect.get("b", "0")) / 100000
+    return left, top, right, bottom
+
+
+def _float_side(run: Run) -> Literal["left", "right"] | None:
+    """Which side of the surrounding text a floating picture sits on, if any.
+
+    ``None`` covers every case this project does not turn into a CSS
+    ``float``/an OOXML floating anchor of its own: an inline picture (no
+    ``wp:anchor``), one Word wraps without flowing text around it at all
+    (``wp:wrapNone``/``wp:wrapTopAndBottom`` -- nothing for "left" or "right"
+    to mean), and one positioned by a raw offset (``wp:posOffset``) rather
+    than the keyword ``wp:align`` -- an offset is measured against the
+    *source* document's own column width and margins, which this project
+    deliberately does not carry over (see the module docstring), so it has no
+    meaning to translate into the target Document's own, different geometry.
+    A keyword, by contrast, means the same thing regardless of the page it is
+    on.
+    """
+    anchor = run._r.find(f".//{qn('wp:anchor')}")
+    if anchor is None:
+        return None
+    wraps_around = any(
+        anchor.find(qn(tag)) is not None
+        for tag in ("wp:wrapSquare", "wp:wrapTight", "wp:wrapThrough")
+    )
+    if not wraps_around:
+        return None
+    position_h = anchor.find(qn("wp:positionH"))
+    if position_h is None:
+        return None
+    align = position_h.find(qn("wp:align"))
+    if align is None:
+        return None
+    if align.text == "left":
+        return "left"
+    if align.text == "right":
+        return "right"
+    return None
 
 
 def _resolve(run: Run, paragraph: WordParagraph, pick: Callable[[Font], _T | None]) -> _T | None:

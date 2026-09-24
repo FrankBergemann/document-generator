@@ -179,12 +179,44 @@ class SectionSpec(BaseModel):
         return self
 
 
+class PostprocessingStep(BaseModel):
+    """One text substitution, run against the assembled Document before rendering.
+
+    Named after its own on/off switch, ``set-invoice-amount`` (a step with the
+    switch off is skipped, not removed, so a recipe can keep it around
+    without acting on it): given ``pattern`` (a sentence), ``old`` (a
+    placeholder inside it) and ``cell`` (the label of a table cell from any
+    imported ``.docx``/``.xlsx`` section), the step finds the one table cell
+    containing ``cell``, takes the text of the cell to its right, and
+    replaces ``old`` with that text everywhere ``pattern`` occurs whole in
+    the Document. See :mod:`cv_generator.postprocessing` for the mechanism.
+
+    ``new`` is required (``extra="forbid"`` demands it) but not read by the
+    step -- it documents, for a human reading the recipe, where the
+    replacement comes from; the value itself is always computed from
+    ``cell``.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    set_invoice_amount: bool = Field(alias="set-invoice-amount")
+    pattern: str
+    old: str
+    new: str
+    cell: str
+
+
 class BuildConfig(BaseModel):
     """A whole ``config.json``."""
 
     model_config = ConfigDict(extra="forbid")
 
     sections: list[SectionSpec] = Field(min_length=1)
+    # Text substitutions run against the assembled Document, after every
+    # section is copied in and before any output format is rendered -- see
+    # :mod:`cv_generator.postprocessing`. Empty by default: most recipes need
+    # none.
+    postprocessing: list[PostprocessingStep] = Field(default_factory=list)
     # The stem of the files a build writes (dist/<output>.html, ...). Defaults to
     # that of the file the header came from, which is what keeps a recipe built
     # around `document.md` producing `dist/document.*` with nothing said about it.
@@ -307,6 +339,7 @@ def resolve_source(
 __all__ = [
     "CONFIG_SUFFIX",
     "BuildConfig",
+    "PostprocessingStep",
     "SectionSpec",
     "SourceFormat",
     "load_config",

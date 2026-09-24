@@ -11,11 +11,20 @@
       "col-end": "G",
       "row-start": 3,
       "row-end": 10,
-      "noframes": true
+      "noframes": false
     },
     {
       "source": "Rechnung-tail.docx",
       "format": "docx"
+    }
+  ],
+    "postprocessing": [
+    {
+      "set-invoice-amount": true,
+      "pattern": "Rechnungsbetrag von 0.000,00 € Euro zu stellen",
+      "old": "0.000,00 €",
+      "new": "${amount-from-invoice-table}",
+      "cell": "Gesamtbetrag"
     }
   ],
   "target": "dist/rechnung"

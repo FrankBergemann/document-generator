@@ -57,12 +57,37 @@ class Photo(BaseModel):
     output has to stay self-contained (the PDF browser may live in another
     container and never sees this filesystem), and ``.docx`` embeds the bytes
     too. Reading the file once, in the parser, keeps both backends off the disk.
+
+    ``width_emu``/``height_emu`` are the size Word actually *displayed* the
+    picture at (``wp:extent``, EMU -- 914400 per inch), which a run imported
+    from a ``.docx`` carries (see ``docx_import._run_image``); both are
+    ``None`` for the Document's own identity photo, which has no such extent
+    to read and is sized by the theme instead (``photo_width_mm`` and
+    friends). The embedded bytes are usually a full-resolution bitmap that is
+    much larger than this -- a photo shown at postage-stamp size in the
+    source -- so without it a renderer has no way to tell "how big" from
+    "how many pixels the file happens to contain".
+
+    ``crop_left``/``crop_top``/``crop_right``/``crop_bottom`` are how much of
+    that bitmap Word's own crop tool hid from each edge, as a fraction (0..1)
+    of the picture -- ``a:srcRect``, read the same way as the extent (see
+    ``docx_import._crop_fractions``), all zero when the picture was not
+    cropped. Without them a renderer would fit the *whole* bitmap into the box
+    ``width_emu``/``height_emu`` describes, stretching back into view the
+    parts Word's crop hid and distorting the parts it kept -- a remainder
+    cropped from one rectangle does not generally share its aspect ratio.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     data: bytes
     media_type: str
+    width_emu: int | None = None
+    height_emu: int | None = None
+    crop_left: float = 0.0
+    crop_top: float = 0.0
+    crop_right: float = 0.0
+    crop_bottom: float = 0.0
 
     def data_uri(self) -> str:
         """The photo as a ``data:`` URL, for embedding in HTML."""
@@ -81,6 +106,15 @@ class RichRun(BaseModel):
     rather than characters -- Word never puts both in the one run. It reuses
     :class:`Photo` rather than a type of its own: the shape (bytes plus a media
     type) is exactly the same, and so is what a renderer does with it.
+
+    ``float_side`` is the *floating* position of an ``image`` -- meaningful
+    only alongside one, ``None`` for a plain text run. It is deliberately
+    narrower than what Word can express: only "wraps text, keyword-aligned
+    left or right" is carried over (see ``docx_import._float_side``), because
+    that is the one floating placement a reflowed Document -- different page
+    size, different surrounding text -- can still reproduce with the *effect*
+    the source had (text wrapping around the picture) rather than a literal,
+    meaningless-once-moved coordinate.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -94,6 +128,7 @@ class RichRun(BaseModel):
     color: str | None = None
     link: str | None = None
     image: Photo | None = None
+    float_side: Literal["left", "right"] | None = None
 
 
 class RichParagraph(BaseModel):

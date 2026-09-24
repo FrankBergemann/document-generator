@@ -189,11 +189,59 @@ body {
 }
 
 .cv-inline-image {
-  /* The source's own size (`wp:extent`) is not carried over, only the image
-     itself -- this is a guard against it overflowing its cell, not a layout
-     decision. */
+  /* An imported picture carries its source size as an inline `width` plus
+     `aspect-ratio` (see render.py::_image_size_style) when the source had
+     one; these two rules are the fallback for a picture that did not
+     (`wp:extent` missing) and, together with that `aspect-ratio`, the guard
+     against a picture wider than its own cell -- not a layout decision.
+     Applies to `.cv-inline-image--cropped` too (see below), whether that is
+     a plain image element or the wrapper element a crop needs: the same
+     fallback and the same guard apply either way. */
   max-width: 100%;
   height: auto;
+}
+
+.cv-inline-image--cropped {
+  /* A crop (`a:srcRect`, see render.py::_image_html) has no CSS property of
+     its own -- this wrapper is the size the source displayed the *cropped*
+     remainder at (via the size rules above), clipping an inner, plain image
+     element sized and positioned in percent (so it shrinks with the wrapper,
+     staying in step with `max-width` above) to hold the picture at its full,
+     pre-crop scale, offset so only the remainder shows through. A generic
+     inline element ignores `width`/`height` unless its `display` says
+     otherwise. */
+  display: inline-block;
+  overflow: hidden;
+  position: relative;
+  vertical-align: middle;
+}
+
+.cv-inline-image--cropped img {
+  position: absolute;
+  /* The inner picture is deliberately larger than its wrapper -- that is the
+     crop -- so the wrapper's own `max-width: 100%` must not also apply here. */
+  max-width: none;
+}
+
+.cv-inline-image--float-left,
+.cv-inline-image--float-right {
+  /* A floating picture Word wrapped text around (`wp:wrapSquare` or tighter,
+     positioned with a plain left/right keyword -- see
+     docx_import.py::_float_side) keeps that effect here: the paragraph's
+     other runs are still plain inline content, so a CSS `float` on the
+     picture alone is enough for them to flow around it, the same shape the
+     source had even though this Document's own column width differs. */
+  margin-bottom: 0.35rem;
+}
+
+.cv-inline-image--float-left {
+  float: left;
+  margin-right: 0.75rem;
+}
+
+.cv-inline-image--float-right {
+  float: right;
+  margin-left: 0.75rem;
 }
 
 .cv-block-table {

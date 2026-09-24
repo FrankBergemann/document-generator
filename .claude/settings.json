@@ -27,5 +27,6 @@
       "Bash(git show:*)",
       "Bash(git branch:*)"
     ]
-  }
+  },
+  "disableRemoteControl": true
 }

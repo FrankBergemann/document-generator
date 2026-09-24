@@ -63,6 +63,7 @@ from cv_generator.docx_import import load_header as load_docx_header
 from cv_generator.docx_import import load_section as load_docx_section
 from cv_generator.errors import DocParseError
 from cv_generator.models import Document, Photo, RichBlock, Section
+from cv_generator.postprocessing import apply_postprocessing
 from cv_generator.xlsx_import import load_section as load_xlsx_section
 
 FRONTMATTER_DELIM = "---"
@@ -283,6 +284,10 @@ def build_doc(
     header or footer. One source of truth for both avoids a document whose
     page furniture is stitched together from two different letterheads.
 
+    ``config.postprocessing`` runs last, once every section is copied in and
+    before the Document is returned -- see
+    :func:`cv_generator.postprocessing.apply_postprocessing`.
+
     Args:
         base_dir: Directory every ``source`` is resolved against -- the config
             file's own, so a recipe and its ingredients travel together.
@@ -352,13 +357,12 @@ def build_doc(
         root = project_root if project_root is not None else Path.cwd()
         target = target_path if target_path.is_absolute() else root / target_path
 
-    return LoadedDocument(
-        _validated(
-            header.meta, photo, header.summary, sections, page_header, page_footer, source=source
-        ),
-        config.output or header.name,
-        target,
+    doc = _validated(
+        header.meta, photo, header.summary, sections, page_header, page_footer, source=source
     )
+    apply_postprocessing(doc, config.postprocessing, source=source)
+
+    return LoadedDocument(doc, config.output or header.name, target)
 
 
 def parse_config_file(path: Path) -> Document:

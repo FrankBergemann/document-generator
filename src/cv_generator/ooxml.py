@@ -13,8 +13,10 @@ these helpers only have to place their own.
 
 from __future__ import annotations
 
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
+from typing import Literal
+
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import nsdecls, qn
 from docx.oxml.xmlchemy import BaseOxmlElement
 from docx.shared import Length
 from docx.styles.style import BaseStyle
@@ -195,3 +197,96 @@ def set_language(style: BaseStyle, lang: str) -> None:
     element = OxmlElement("w:lang")
     element.set(qn("w:val"), lang)
     properties.append(element)
+
+
+# Word's own default z-order (`relativeHeight`) for the first floating shape
+# in a document -- confirmed against a real anchored picture in
+# data/cv/cv-head.docx. `float_picture` offsets it by the picture's own
+# `docPr` id, so two floating pictures in one Document still get distinct
+# values without this module having to remember state across calls.
+_FLOAT_RELATIVE_HEIGHT_BASE = 251658240
+
+# `CT_Anchor`'s child sequence -- confirmed the same way, against the same
+# real picture: `wp:simplePos`, `wp:positionH`, `wp:positionV`, `wp:extent`,
+# `wp:effectExtent`, the wrap choice, then `wp:docPr`/`wp:cNvGraphicFramePr`/
+# `a:graphic`, appended by `float_picture` itself (see there). `distT`/`distB`/
+# `distL`/`distR` (the gap kept between the picture and the text it wraps) and
+# `wp:effectExtent`'s all-zero edges are the same values Word itself writes
+# for a plain, unshadowed picture.
+_ANCHOR_XML = (
+    '<wp:anchor {nsdecls} distT="45720" distB="45720" distL="91440" distR="91440" '
+    'simplePos="0" relativeHeight="{relative_height}" behindDoc="0" locked="0" '
+    'layoutInCell="1" allowOverlap="1">'
+    '<wp:simplePos x="0" y="0"/>'
+    '<wp:positionH relativeFrom="column"><wp:align>{side}</wp:align></wp:positionH>'
+    '<wp:positionV relativeFrom="paragraph"><wp:align>top</wp:align></wp:positionV>'
+    '<wp:extent cx="{cx}" cy="{cy}"/>'
+    '<wp:effectExtent l="0" t="0" r="0" b="0"/>'
+    '<wp:wrapSquare wrapText="bothSides"/>'
+    "</wp:anchor>"
+)
+
+
+def float_picture(run: Run, *, side: Literal["left", "right"]) -> None:
+    """Turn the inline picture ``run`` just got from ``add_picture`` into a
+    floating one, wrapped square and positioned to ``side`` of the column --
+    the same shape Word itself writes for a picture whose wrap is changed
+    from "in line with text" to "square" and then nudged to a side.
+
+    python-docx has no API for a floating picture (``wp:anchor``) -- only
+    ``add_picture``'s inline ``wp:inline`` -- so this rebuilds the wrapper by
+    hand (``_ANCHOR_XML``) and moves across the parts that do not change --
+    ``wp:docPr``, ``wp:cNvGraphicFramePr`` and ``a:graphic`` (the picture
+    itself, ``add_picture`` already built it) -- rather than rebuilding them;
+    only the position/wrap/z-order parts, new to a floating picture, are
+    freshly written.
+    """
+    drawing = run._r.find(qn("w:drawing"))
+    inline = drawing.find(qn("wp:inline"))
+    extent = inline.find(qn("wp:extent"))
+    doc_pr = inline.find(qn("wp:docPr"))
+    frame_pr = inline.find(qn("wp:cNvGraphicFramePr"))
+    graphic = inline.find(qn("a:graphic"))
+
+    relative_height = _FLOAT_RELATIVE_HEIGHT_BASE + int(doc_pr.get("id", "0"))
+    anchor = parse_xml(
+        _ANCHOR_XML.format(
+            nsdecls=nsdecls("wp", "a", "pic", "r"),
+            relative_height=relative_height,
+            side=side,
+            cx=extent.get("cx"),
+            cy=extent.get("cy"),
+        )
+    )
+    anchor.append(doc_pr)
+    if frame_pr is not None:
+        anchor.append(frame_pr)
+    anchor.append(graphic)
+    drawing.replace(inline, anchor)
+
+
+def set_picture_crop(
+    run: Run, *, left: float = 0.0, top: float = 0.0, right: float = 0.0, bottom: float = 0.0
+) -> None:
+    """Crop the run's just-added picture the way the source's own crop did.
+
+    Each edge is a fraction (0..1) of the picture, the same shape
+    :mod:`cv_generator.docx_import` reads a source crop into. Writes
+    ``a:srcRect`` -- Word's own crop record -- rather than pre-cropping the
+    bitmap, since that is exactly what a cropped picture in a real ``.docx``
+    already carries. It sits between ``a:blip`` and ``a:stretch`` inside
+    ``pic:blipFill``, the same fixed sequence python-docx's own
+    ``CT_BlipFillProperties.blip`` declares as its successors without
+    exposing a way to insert into it. A zero-valued edge is left out rather
+    than written as ``="0"``, the same as a source picture that was cropped on
+    some edges and not others.
+    """
+    blip_fill = run._r.find(f".//{qn('pic:blipFill')}")
+    if blip_fill is None:
+        return
+    src_rect = OxmlElement("a:srcRect")
+    for edge, value in (("l", left), ("t", top), ("r", right), ("b", bottom)):
+        if value:
+            src_rect.set(edge, str(round(value * 100000)))
+    blip = blip_fill.find(qn("a:blip"))
+    blip.addnext(src_rect)

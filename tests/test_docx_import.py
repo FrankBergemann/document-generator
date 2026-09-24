@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from typing import cast
 
 import docx
 import pytest
@@ -9,6 +10,9 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls, qn
+from docx.oxml.xmlchemy import BaseOxmlElement
+from docx.shared import Cm
+from docx.text.run import Run
 
 from cv_generator.docx_import import load_footer, load_section
 from cv_generator.errors import DocParseError
@@ -514,6 +518,39 @@ class TestImages:
         assert any(r.image is not None for r in paragraph_runs)
         assert any(r.text == "Before" for r in paragraph_runs)
 
+    def test_a_resized_image_keeps_its_displayed_size(self, tmp_path: Path) -> None:
+        # `png(20, 20)` is a 20x20-pixel bitmap; asking for a 3cm x 4cm display
+        # size is the case this exists for -- a photo embedded at full camera
+        # resolution but shown much smaller in the source document.
+        document = docx.Document()
+        run = document.add_paragraph().add_run()
+        run.add_picture(io.BytesIO(png(20, 20)), width=Cm(3), height=Cm(4))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        image_runs = [r for r in _top_level_runs(blocks) if r.image is not None]
+        assert image_runs[0].image is not None
+        assert image_runs[0].image.width_emu == Cm(3)
+        assert image_runs[0].image.height_emu == Cm(4)
+
+    def test_an_unsized_image_still_gets_the_size_word_wrote(self, tmp_path: Path) -> None:
+        # `add_picture` with no explicit width/height still writes a `wp:extent`
+        # of its own (the bitmap's native size at 96dpi) -- read that one too,
+        # rather than treating "no size given to add_picture" as "no size to read".
+        document = docx.Document()
+        run = document.add_paragraph().add_run()
+        run.add_picture(io.BytesIO(png(20, 20)))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        image_runs = [r for r in _top_level_runs(blocks) if r.image is not None]
+        image = image_runs[0].image
+        assert image is not None
+        assert image.width_emu is not None
+        assert image.height_emu is not None
+
     def test_a_picture_anchored_behind_the_text_is_not_imported(self, tmp_path: Path) -> None:
         # A letterhead-style header commonly floats a full-page background
         # image behind the text (`wp:anchor behindDoc="1"`) -- Word shows it
@@ -537,3 +574,167 @@ class TestImages:
         paragraph_runs = _top_level_runs(blocks)
         assert not any(r.image is not None for r in paragraph_runs)
         assert any(r.text == "Before" for r in paragraph_runs)
+
+
+class TestImageCrop:
+    """``a:srcRect`` -- Word's own crop record -- becomes ``Photo``'s
+    ``crop_left``/``crop_top``/``crop_right``/``crop_bottom``, each a fraction
+    (0..1) of the picture (see ``_crop_fractions``)."""
+
+    def test_a_cropped_picture_keeps_its_crop_fractions(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        run = document.add_paragraph().add_run()
+        run.add_picture(io.BytesIO(png(20, 20)))
+        blip = run._r.find(f".//{qn('a:blip')}")
+        src_rect = parse_xml(f'<a:srcRect {nsdecls("a")} l="10000" t="20000" r="5000" b="25000"/>')
+        blip.addnext(src_rect)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        image = next(r for r in _top_level_runs(blocks) if r.image is not None).image
+        assert image is not None
+        assert image.crop_left == pytest.approx(0.1)
+        assert image.crop_top == pytest.approx(0.2)
+        assert image.crop_right == pytest.approx(0.05)
+        assert image.crop_bottom == pytest.approx(0.25)
+
+    def test_an_edge_missing_from_src_rect_crops_nothing_on_that_edge(self, tmp_path: Path) -> None:
+        # `a:srcRect`'s own edges are each individually optional -- a picture
+        # cropped on only one side has no `l`/`t`/`b` at all, not zeros.
+        document = docx.Document()
+        run = document.add_paragraph().add_run()
+        run.add_picture(io.BytesIO(png(20, 20)))
+        blip = run._r.find(f".//{qn('a:blip')}")
+        src_rect = parse_xml(f'<a:srcRect {nsdecls("a")} r="30000"/>')
+        blip.addnext(src_rect)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        image = next(r for r in _top_level_runs(blocks) if r.image is not None).image
+        assert image is not None
+        assert (image.crop_left, image.crop_top, image.crop_bottom) == (0.0, 0.0, 0.0)
+        assert image.crop_right == pytest.approx(0.3)
+
+    def test_an_uncropped_picture_has_zero_crop_fractions(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        run = document.add_paragraph().add_run()
+        run.add_picture(io.BytesIO(png(20, 20)))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        image = next(r for r in _top_level_runs(blocks) if r.image is not None).image
+        assert image is not None
+        assert (image.crop_left, image.crop_top, image.crop_right, image.crop_bottom) == (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        )
+
+
+def _anchor(picture_run: Run) -> BaseOxmlElement:
+    """Retag `picture_run`'s inline picture as a floating one, for a test.
+
+    Only what `_float_side` itself reads -- `behindDoc`/`simplePos` (also set
+    by a real anchor, kept here so this stays a plausible one) plus whatever
+    wrap/position the test appends -- not a schema-complete `wp:anchor`, the
+    same "just enough to exercise the importer" as `write_projektliste`'s
+    fixture is for a section import.
+    """
+    drawing = picture_run._r.find(qn("w:drawing"))
+    inline = cast(BaseOxmlElement, drawing.find(qn("wp:inline")))
+    inline.tag = qn("wp:anchor")
+    inline.set("behindDoc", "0")
+    inline.set("simplePos", "0")
+    return inline
+
+
+class TestFloatingImagePosition:
+    """A floating picture (``wp:anchor``) Word wraps text around, and
+    positions with a plain left/right keyword, keeps that side
+    (``RichRun.float_side`` -- see ``_float_side``). Every other floating
+    shape is flattened into the reading order in place, ``float_side`` left
+    ``None`` -- the same as before this existed."""
+
+    def test_wrapped_square_and_aligned_left_keeps_left(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        picture_run = document.add_paragraph().add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)))
+        anchor = _anchor(picture_run)
+        anchor.append(parse_xml(f'<wp:wrapSquare {nsdecls("wp")} wrapText="bothSides"/>'))
+        position_h = parse_xml(f'<wp:positionH {nsdecls("wp")} relativeFrom="column"/>')
+        position_h.append(parse_xml(f"<wp:align {nsdecls('wp')}>left</wp:align>"))
+        anchor.append(position_h)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        run = next(r for r in _top_level_runs(blocks) if r.image is not None)
+        assert run.float_side == "left"
+
+    def test_wrapped_tight_and_aligned_right_keeps_right(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        picture_run = document.add_paragraph().add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)))
+        anchor = _anchor(picture_run)
+        anchor.append(parse_xml(f'<wp:wrapTight {nsdecls("wp")} wrapText="bothSides"/>'))
+        position_h = parse_xml(f'<wp:positionH {nsdecls("wp")} relativeFrom="column"/>')
+        position_h.append(parse_xml(f"<wp:align {nsdecls('wp')}>right</wp:align>"))
+        anchor.append(position_h)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        run = next(r for r in _top_level_runs(blocks) if r.image is not None)
+        assert run.float_side == "right"
+
+    def test_wrap_none_has_no_float_side(self, tmp_path: Path) -> None:
+        # `wrapNone` (or `wrapTopAndBottom`) leaves no text beside the picture
+        # to wrap -- nothing for "left"/"right" to mean.
+        document = docx.Document()
+        picture_run = document.add_paragraph().add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)))
+        anchor = _anchor(picture_run)
+        anchor.append(parse_xml(f"<wp:wrapNone {nsdecls('wp')}/>"))
+        position_h = parse_xml(f'<wp:positionH {nsdecls("wp")} relativeFrom="column"/>')
+        position_h.append(parse_xml(f"<wp:align {nsdecls('wp')}>left</wp:align>"))
+        anchor.append(position_h)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        run = next(r for r in _top_level_runs(blocks) if r.image is not None)
+        assert run.float_side is None
+
+    def test_positioned_by_offset_has_no_float_side(self, tmp_path: Path) -> None:
+        # `wp:posOffset` is measured against the source's own column width and
+        # margins, which this project does not carry over -- see the module
+        # docstring -- so there is no side to translate it into here.
+        document = docx.Document()
+        picture_run = document.add_paragraph().add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)))
+        anchor = _anchor(picture_run)
+        anchor.append(parse_xml(f'<wp:wrapSquare {nsdecls("wp")} wrapText="bothSides"/>'))
+        position_h = parse_xml(f'<wp:positionH {nsdecls("wp")} relativeFrom="column"/>')
+        position_h.append(parse_xml(f"<wp:posOffset {nsdecls('wp')}>914400</wp:posOffset>"))
+        anchor.append(position_h)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        run = next(r for r in _top_level_runs(blocks) if r.image is not None)
+        assert run.float_side is None
+
+    def test_an_inline_picture_has_no_float_side(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        run = document.add_paragraph().add_run()
+        run.add_picture(io.BytesIO(png(20, 20)))
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        image_run = next(r for r in _top_level_runs(blocks) if r.image is not None)
+        assert image_run.float_side is None
