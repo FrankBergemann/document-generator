@@ -173,9 +173,14 @@ body {
 }
 
 .cv-blocks p:empty {
-  /* A blank paragraph inside a cell is a blank line in Word. Left alone it
-     collapses to its margins here, and the two formats drift apart. */
-  min-height: 1em;
+  /* A blank paragraph is a blank line in Word. Left alone it collapses to
+     its margins here, and the two formats drift apart. As tall as Word
+     draws it, single-spaced -- about 1.15 times its font size -- rather
+     than this theme's roomier `line-height`: a document of many blank lines
+     (a letter, an invoice) would otherwise outgrow the page it filled in
+     Word. Its size is the source's own, as an inline font-size (see
+     render.py::_paragraph_attr). */
+  min-height: 1.15em;
 }
 
 .cv-blocks ul,
@@ -269,6 +274,25 @@ body {
   border: 0.5pt solid var(--rule);
 }
 
+/* Single outer rules of a table that is not a grid -- a line above and below
+   a block of details, say. Unlike a grid's hairlines these are the table's
+   only lines, set as a deliberate separator, so they are drawn in ink. */
+.cv-block-table--rule-top {
+  border-top: 1pt solid var(--ink);
+}
+
+.cv-block-table--rule-left {
+  border-left: 1pt solid var(--ink);
+}
+
+.cv-block-table--rule-bottom {
+  border-bottom: 1pt solid var(--ink);
+}
+
+.cv-block-table--rule-right {
+  border-right: 1pt solid var(--ink);
+}
+
 /* Not a per-page header -- see document.html.j2. Set off from what follows it
    the same way a source document's own header reads: smaller, muted, ruled
    off from the body underneath. */
@@ -297,6 +321,13 @@ body {
 
 .cv-page-footer p {
   margin: 0;
+}
+
+/* Printed by pdf/chrome.py, the footer repeats on every page from its
+   template instead (see document.html.j2), so the one at the end would say
+   the same thing twice. */
+.cv-pdf-paged .cv-page-footer {
+  display: none;
 }
 
 a {

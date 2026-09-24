@@ -11,7 +11,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls, qn
 from docx.oxml.xmlchemy import BaseOxmlElement
-from docx.shared import Cm
+from docx.shared import Cm, Pt
+from docx.text.paragraph import Paragraph as WordParagraph
 from docx.text.run import Run
 
 from cv_generator.docx_import import load_footer, load_section
@@ -225,6 +226,46 @@ class TestFormatting:
         ]
 
 
+class TestBlankParagraphSize:
+    """A blank paragraph is as tall as its paragraph mark's font size in Word,
+    so that size is kept -- a blank line under a 24pt title is a 24pt line."""
+
+    def test_the_mark_s_own_size_is_read(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        blank = document.add_paragraph()
+        blank._p.get_or_add_pPr().append(
+            parse_xml(f'<w:rPr {nsdecls("w")}><w:sz w:val="48"/></w:rPr>')
+        )
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        (paragraph,) = load_section(path)
+        assert isinstance(paragraph, RichParagraph)
+        assert paragraph.blank_size_pt == 24.0
+
+    def test_without_one_the_paragraph_style_s_size_is_used(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        document.styles["Normal"].font.size = Pt(11)
+        document.add_paragraph()
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        (paragraph,) = load_section(path)
+        assert isinstance(paragraph, RichParagraph)
+        assert paragraph.blank_size_pt == 11.0
+
+    def test_a_paragraph_with_text_takes_its_size_from_its_runs(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        document.styles["Normal"].font.size = Pt(11)
+        document.add_paragraph("Text")
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+
+        (paragraph,) = load_section(path)
+        assert isinstance(paragraph, RichParagraph)
+        assert paragraph.blank_size_pt is None
+
+
 class TestAlignment:
     """A letterhead-style header commonly right-aligns its identity block
     (``w:jc``) -- dropping it turns "flush right" into "flush left", the same
@@ -323,6 +364,55 @@ class TestTableGeometry:
         # Unlike an `.xlsx` range, a `.docx` table is meant to fill the page the
         # way it did in the source document.
         assert all(not table.centered for table in tables(blocks))
+        assert all(not table.outer_rules for table in tables(blocks))
+
+    def test_rules_above_and_below_are_kept_without_making_a_grid(self, tmp_path: Path) -> None:
+        # A block of personal details ruled off above and below: not a grid,
+        # but the two lines are part of what it looks like.
+        table = _ruled_table(tmp_path, "top", "bottom")
+        assert table.bordered is False
+        assert table.outer_rules == ["top", "bottom"]
+
+    def test_a_full_box_is_bordered_with_no_separate_rules(self, tmp_path: Path) -> None:
+        table = _ruled_table(tmp_path, "bottom", "right", "top", "left")
+        assert table.bordered is True
+        assert table.outer_rules == []
+
+    def test_a_vertically_merged_cell_is_read_once(self, tmp_path: Path) -> None:
+        # `row.cells` hands back the merged cell for every row it spans, which
+        # would repeat its content -- a portrait beside a block of details
+        # would appear once per row.
+        document = docx.Document()
+        word_table = document.add_table(rows=3, cols=2)
+        word_table.cell(0, 1).text = "Portrait"
+        word_table.cell(0, 1).merge(word_table.cell(2, 1))
+        for row in range(3):
+            word_table.cell(row, 0).text = f"Row {row}"
+        path = tmp_path / "merged.docx"
+        document.save(str(path))
+
+        (table,) = tables(load_section(path))
+        assert [[cell.merged for cell in row] for row in table.rows] == [
+            [False, False],
+            [False, True],
+            [False, True],
+        ]
+        assert table.rows[0][1].row_span == 3
+        assert table.rows[0][1].paragraphs[0].text() == "Portrait"
+        assert all(not row[1].paragraphs for row in table.rows[1:])
+
+
+def _ruled_table(tmp_path: Path, *edges: str) -> RichTable:
+    """The one table of a `.docx` whose own `w:tblBorders` rules `edges`."""
+    document = docx.Document()
+    word_table = document.add_table(rows=1, cols=1)
+    word_table.cell(0, 0).text = "Cell"
+    lines = "".join(f'<w:{edge} w:val="single" w:sz="12"/>' for edge in edges)
+    word_table._tbl.tblPr.append(parse_xml(f"<w:tblBorders {nsdecls('w')}>{lines}</w:tblBorders>"))
+    path = tmp_path / "ruled.docx"
+    document.save(str(path))
+    (table,) = tables(load_section(path))
+    return table
 
 
 def _write_footer_docx(path: Path, *, footer_paragraphs: list[str] | None = None) -> None:
@@ -336,6 +426,132 @@ def _write_footer_docx(path: Path, *, footer_paragraphs: list[str] | None = None
         for text in footer_paragraphs[1:]:
             footer.add_paragraph(text)
     document.save(str(path))
+
+
+def _append_runs(paragraph: WordParagraph, xml: str) -> None:
+    """Append raw ``w:r``/``w:fldSimple`` elements to ``paragraph``."""
+    for element in parse_xml(f"<w:p {nsdecls('w')}>{xml}</w:p>"):
+        paragraph._p.append(element)
+
+
+class TestPageBreaks:
+    """``w:br w:type="page"`` and ``w:pageBreakBefore`` become the paragraph's
+    ``page_break_before``/``page_break_after``."""
+
+    def _body(self, tmp_path: Path, xml: str) -> list[RichParagraph]:
+        document = docx.Document()
+        paragraph = document.add_paragraph()
+        _append_runs(paragraph, xml)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        blocks = load_section(path)
+        assert all(isinstance(block, RichParagraph) for block in blocks)
+        return cast(list[RichParagraph], blocks)
+
+    @staticmethod
+    def _shape(paragraphs: list[RichParagraph]) -> list[tuple[str, bool, bool]]:
+        return [(p.text(), p.page_break_before, p.page_break_after) for p in paragraphs]
+
+    def test_a_paragraph_of_only_a_break_breaks_after_itself(self, tmp_path: Path) -> None:
+        # The CV's own shape: the paragraph mark stays on the old page, so
+        # this is one empty paragraph, not an empty line atop the next page.
+        paragraphs = self._body(tmp_path, '<w:r><w:br w:type="page"/></w:r>')
+        assert self._shape(paragraphs) == [("", False, True)]
+
+    def test_a_break_mid_paragraph_splits_it(self, tmp_path: Path) -> None:
+        paragraphs = self._body(
+            tmp_path, '<w:r><w:t>Before</w:t><w:br w:type="page"/><w:t>After</w:t></w:r>'
+        )
+        assert self._shape(paragraphs) == [("Before", False, False), ("After", True, False)]
+
+    def test_a_break_at_the_start_leaves_no_blank_line_behind(self, tmp_path: Path) -> None:
+        paragraphs = self._body(tmp_path, '<w:r><w:br w:type="page"/><w:t>After</w:t></w:r>')
+        assert self._shape(paragraphs) == [("After", True, False)]
+
+    def test_a_plain_line_break_is_not_a_page_break(self, tmp_path: Path) -> None:
+        paragraphs = self._body(tmp_path, "<w:r><w:t>One</w:t><w:br/><w:t>Two</w:t></w:r>")
+        assert self._shape(paragraphs) == [("One\nTwo", False, False)]
+
+    def test_page_break_before_is_read(self, tmp_path: Path) -> None:
+        document = docx.Document()
+        document.add_paragraph("New page").paragraph_format.page_break_before = True
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        (paragraph,) = load_section(path)
+        assert isinstance(paragraph, RichParagraph)
+        assert paragraph.page_break_before is True
+
+    def test_a_break_inside_a_table_cell_is_dropped(self, tmp_path: Path) -> None:
+        # Word itself ignores it there: a cell cannot start a new page.
+        document = docx.Document()
+        cell = document.add_table(rows=1, cols=1).cell(0, 0)
+        _append_runs(cell.paragraphs[0], '<w:r><w:t>A</w:t><w:br w:type="page"/><w:t>B</w:t></w:r>')
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        (table,) = tables(load_section(path))
+        (paragraph,) = table.rows[0][0].paragraphs
+        assert (paragraph.text(), paragraph.page_break_before) == ("AB", False)
+
+
+class TestPageFields:
+    """A "Seite 2 von 4" footer is two Word fields. Their cached result text
+    is kept, marked with the field it belongs to, so a renderer with pages can
+    compute it afresh."""
+
+    def _footer_paragraph(self, tmp_path: Path, xml: str) -> RichParagraph:
+        document = docx.Document()
+        document.add_paragraph("Body")
+        footer = document.sections[0].footer
+        footer.is_linked_to_previous = False
+        footer.paragraphs[0].add_run("Seite ")
+        _append_runs(footer.paragraphs[0], xml)
+        path = tmp_path / "brief.docx"
+        document.save(str(path))
+        (paragraph,) = load_footer(path)
+        assert isinstance(paragraph, RichParagraph)
+        return paragraph
+
+    def test_a_complex_page_field_marks_its_result_run(self, tmp_path: Path) -> None:
+        paragraph = self._footer_paragraph(
+            tmp_path,
+            '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+            '<w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>'
+            '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+            "<w:r><w:t>2</w:t></w:r>"
+            '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
+            '<w:r><w:t xml:space="preserve"> von </w:t></w:r>'
+            '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+            "<w:r><w:instrText>NUMPAGES</w:instrText></w:r>"
+            '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+            "<w:r><w:t>4</w:t></w:r>"
+            '<w:r><w:fldChar w:fldCharType="end"/></w:r>',
+        )
+        assert [(run.text, run.field) for run in paragraph.runs] == [
+            ("Seite ", None),
+            ("2", "page"),
+            (" von ", None),
+            ("4", "pages"),
+        ]
+
+    def test_a_simple_page_field_is_read_too(self, tmp_path: Path) -> None:
+        paragraph = self._footer_paragraph(
+            tmp_path, '<w:fldSimple w:instr=" PAGE "><w:r><w:t>2</w:t></w:r></w:fldSimple>'
+        )
+        assert [(run.text, run.field) for run in paragraph.runs] == [
+            ("Seite ", None),
+            ("2", "page"),
+        ]
+
+    def test_any_other_field_stays_plain_text(self, tmp_path: Path) -> None:
+        paragraph = self._footer_paragraph(
+            tmp_path,
+            '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+            "<w:r><w:instrText>DATE</w:instrText></w:r>"
+            '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+            "<w:r><w:t>24.09.2026</w:t></w:r>"
+            '<w:r><w:fldChar w:fldCharType="end"/></w:r>',
+        )
+        assert [(run.text, run.field) for run in paragraph.runs] == [("Seite 24.09.2026", None)]
 
 
 class TestFooter:
@@ -567,6 +783,7 @@ class TestImages:
         inline.tag = qn("wp:anchor")
         inline.set("behindDoc", "1")
         inline.set("simplePos", "0")
+        inline.find(qn("wp:extent")).set("cx", str(Cm(21)))
         path = tmp_path / "brief.docx"
         document.save(str(path))
 
@@ -574,6 +791,23 @@ class TestImages:
         paragraph_runs = _top_level_runs(blocks)
         assert not any(r.image is not None for r in paragraph_runs)
         assert any(r.text == "Before" for r in paragraph_runs)
+
+    def test_a_small_picture_behind_the_text_is_still_imported(self, tmp_path: Path) -> None:
+        # A CV portrait placed into a table cell is routinely anchored behind
+        # the text too, so the cell's text does not reflow around it -- that
+        # one is content, not page scenery.
+        document = docx.Document()
+        picture_run = document.add_paragraph().add_run()
+        picture_run.add_picture(io.BytesIO(png(20, 20)), width=Cm(4.6))
+        inline = picture_run._r.find(qn("w:drawing")).find(qn("wp:inline"))
+        inline.tag = qn("wp:anchor")
+        inline.set("behindDoc", "1")
+        inline.set("simplePos", "0")
+        path = tmp_path / "portrait.docx"
+        document.save(str(path))
+
+        blocks = load_section(path)
+        assert any(r.image is not None for r in _top_level_runs(blocks))
 
 
 class TestImageCrop:

@@ -1118,6 +1118,7 @@ class TestDocxHeaderFooter:
         inline.tag = qn("wp:anchor")
         inline.set("behindDoc", "1")
         inline.set("simplePos", "0")
+        inline.find(qn("wp:extent")).set("cx", str(21 * 360000))  # a whole A4 width
         path = projects_dir / "Brief.docx"
         document.save(str(path))
 

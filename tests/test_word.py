@@ -413,6 +413,21 @@ class TestPageFooter:
         run = document.sections[-1].footer.paragraphs[0].runs[0]
         assert run.bold is True
 
+    def test_page_fields_are_written_as_real_fields(self, tmp_path: Path) -> None:
+        # Otherwise every page would say the number the source had cached.
+        runs = [
+            RichRun(text="Seite "),
+            RichRun(text="2", field="page", bold=True),
+            RichRun(text=" von "),
+            RichRun(text="4", field="pages"),
+        ]
+        doc = Document(page_footer=[RichParagraph(runs=runs)])
+        document = read(write(doc, tmp_path))
+        fields = document.sections[-1].footer._element.findall(f".//{qn('w:fldSimple')}")
+        assert [field.get(qn("w:instr")) for field in fields] == ["PAGE", "NUMPAGES"]
+        # The cached result keeps the run's own formatting.
+        assert fields[0].find(f".//{qn('w:b')}") is not None
+
 
 class TestEmptyHeader:
     """A recipe with nothing to put in the header gets no header at all --
@@ -785,6 +800,57 @@ def _cv_with_table(*, centered: bool, column_widths: list[float] | None = None) 
     table = RichTable(rows=[[cell, cell]], centered=centered, column_widths=column_widths or [])
     section = Section(title="Zahlen", slug="zahlen", markdown="", blocks=[table])
     return Document(name="Ada", sections=[section])
+
+
+class TestBlankImportedParagraph:
+    def test_a_blank_paragraph_keeps_its_mark_size_in_schema_order(self, tmp_path: Path) -> None:
+        blank = RichParagraph(blank_size_pt=24.0, alignment="center")
+        section = Section(title="Daten", slug="daten", markdown="", blocks=[blank])
+        doc = read(write(Document(name="Ada", sections=[section]), tmp_path))
+        properties = next(
+            p._p.pPr for p in doc.paragraphs if p.alignment == WD_ALIGN_PARAGRAPH.CENTER
+        )
+        assert properties is not None
+        mark = properties.find(qn("w:rPr"))
+        assert mark.find(qn("w:sz")).get(qn("w:val")) == "48"
+        # `w:rPr` follows `w:jc` in CT_PPr's sequence.
+        assert list(properties).index(mark) > list(properties).index(properties.find(qn("w:jc")))
+
+
+class TestImportedPageBreaks:
+    def _body_xml(self, tmp_path: Path, *blocks: RichParagraph) -> str:
+        section = Section(title="Daten", slug="daten", markdown="", blocks=list(blocks))
+        return str(read(write(Document(name="Ada", sections=[section]), tmp_path)).element.xml)
+
+    def test_a_break_after_is_a_page_break_run(self, tmp_path: Path) -> None:
+        xml = self._body_xml(tmp_path, RichParagraph(page_break_after=True))
+        assert xml.count('w:type="page"') == 1
+
+    def test_a_break_before_is_page_break_before(self, tmp_path: Path) -> None:
+        xml = self._body_xml(
+            tmp_path, RichParagraph(runs=[RichRun(text="x")], page_break_before=True)
+        )
+        assert "<w:pageBreakBefore/>" in xml
+
+
+class TestImportedTableRulesAndMerges:
+    def test_outer_rules_are_written_in_schema_order(self, tmp_path: Path) -> None:
+        cell = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="x")])])
+        table = RichTable(rows=[[cell]], outer_rules=["top", "bottom"])
+        section = Section(title="Daten", slug="daten", markdown="", blocks=[table])
+        doc = read(write(Document(name="Ada", sections=[section]), tmp_path))
+        borders = doc.tables[0]._tbl.tblPr.find(qn("w:tblBorders"))
+        assert [edge.tag for edge in borders] == [qn("w:top"), qn("w:bottom")]
+
+    def test_a_vertically_merged_cell_is_merged_with_its_content_once(self, tmp_path: Path) -> None:
+        text = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="x")])])
+        portrait = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="P")])], row_span=2)
+        table = RichTable(rows=[[text, portrait], [text, RichCell(merged=True)]])
+        section = Section(title="Daten", slug="daten", markdown="", blocks=[table])
+        doc = read(write(Document(name="Ada", sections=[section]), tmp_path))
+        word_table = doc.tables[0]
+        assert word_table.cell(0, 1)._tc is word_table.cell(1, 1)._tc
+        assert word_table.cell(0, 1).text == "P"
 
 
 class TestCenteredImportedTable:

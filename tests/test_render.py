@@ -179,6 +179,23 @@ def _one_cell_table(*, centered: bool, column_widths: list[float] | None = None)
     )
 
 
+class TestTableRulesAndMerges:
+    def test_outer_rules_get_one_class_per_edge(self) -> None:
+        cell = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="x")])])
+        html = blocks_to_html([RichTable(rows=[[cell]], outer_rules=["top", "bottom"])])
+        assert (
+            '<table class="cv-block-table cv-block-table--rule-top cv-block-table--rule-bottom">'
+            in html
+        )
+
+    def test_a_vertically_merged_cell_spans_its_rows_once(self) -> None:
+        text = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="x")])])
+        portrait = RichCell(paragraphs=[RichParagraph(runs=[RichRun(text="P")])], row_span=2)
+        html = blocks_to_html([RichTable(rows=[[text, portrait], [text, RichCell(merged=True)]])])
+        assert html.count('<td rowspan="2">') == 1
+        assert html.count("<td") == 3
+
+
 class TestCenteredTable:
     """An `.xlsx` import sizes its table to its content and centers it."""
 
@@ -317,6 +334,24 @@ class TestParagraphAlignment:
         assert "<p>x</p>" in html
         assert "text-align" not in html
 
+    def test_a_blank_paragraph_keeps_its_size(self) -> None:
+        html = blocks_to_html([RichParagraph(blank_size_pt=24.0)])
+        assert '<p style="font-size:24pt"></p>' in html
+
+    def test_alignment_and_blank_size_share_one_style_attribute(self) -> None:
+        html = blocks_to_html([RichParagraph(alignment="center", blank_size_pt=11.5)])
+        assert '<p style="text-align:center;font-size:11.5pt"></p>' in html
+
+    def test_page_breaks_become_css_breaks(self) -> None:
+        html = blocks_to_html(
+            [
+                RichParagraph(runs=[RichRun(text="a")], page_break_after=True),
+                RichParagraph(runs=[RichRun(text="b")], page_break_before=True),
+            ]
+        )
+        assert '<p style="break-after:page">a</p>' in html
+        assert '<p style="break-before:page">b</p>' in html
+
     def test_a_right_aligned_list_item_gets_the_style(self) -> None:
         html = blocks_to_html([RichParagraph(runs=[RichRun(text="x")], level=0, alignment="right")])
         assert '<li style="text-align:right">x</li>' in html
@@ -433,6 +468,30 @@ class TestPageFooter:
         # always inlined), so this checks for the <footer> element itself.
         doc = Document(name="Ada")
         assert "<footer" not in renderer.render_html(doc)
+        assert "<template" not in renderer.render_html(doc)
+
+    def test_page_fields_carry_chromium_s_class_names(self) -> None:
+        # Inside the PDF's per-page footer template Chromium fills these in;
+        # anywhere else the cached value stays shown.
+        html = blocks_to_html(
+            [
+                RichParagraph(
+                    runs=[RichRun(text="2", field="page"), RichRun(text="4", field="pages")]
+                )
+            ]
+        )
+        assert '<span class="pageNumber">2</span>' in html
+        assert '<span class="totalPages">4</span>' in html
+
+    def test_a_line_break_inside_a_run_is_kept(self) -> None:
+        html = blocks_to_html([RichParagraph(runs=[RichRun(text="Name\nSeite")])])
+        assert "Name<br>Seite" in html
+
+    def test_the_footer_is_also_offered_as_a_per_page_template(self, renderer: Renderer) -> None:
+        doc = Document(page_footer=[RichParagraph(runs=[RichRun(text="Footer text")])])
+        html = renderer.render_html(doc)
+        template = html[html.index('<template id="cv-pdf-page-footer">') :]
+        assert "Footer text" in template[: template.index("</template>")]
 
     def test_page_footer_text_is_escaped(self, renderer: Renderer) -> None:
         doc = Document(

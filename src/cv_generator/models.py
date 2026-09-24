@@ -129,6 +129,11 @@ class RichRun(BaseModel):
     link: str | None = None
     image: Photo | None = None
     float_side: Literal["left", "right"] | None = None
+    # A Word field whose value depends on pagination -- `PAGE` ("page") or
+    # `NUMPAGES` ("pages"), as in "Seite 2 von 4". `text` is the value Word
+    # last cached for it, which is all a renderer without pages can show; one
+    # with pages (the PDF's per-page footer, a `.docx`) computes it afresh.
+    field: Literal["page", "pages"] | None = None
 
 
 class RichParagraph(BaseModel):
@@ -145,6 +150,17 @@ class RichParagraph(BaseModel):
     # applies -- the same "not set here" as an absent `level` or `image`, not a
     # fifth alignment value of its own.
     alignment: Literal["left", "center", "right", "justify"] | None = None
+    # The font size of a blank paragraph's own paragraph mark, which is what
+    # sets its height in Word: a blank line under a 24pt title is a 24pt line.
+    # Only set for a paragraph with no runs -- one with runs takes its height
+    # from them -- and None when the source left it to the theme.
+    blank_size_pt: float | None = None
+    # A page break in the source: before this paragraph (`w:pageBreakBefore`,
+    # or the part of a paragraph after a `w:br w:type="page"`), or after it (a
+    # break that ended the paragraph). Meaningful only where there are pages;
+    # never set inside a table cell or a page header/footer.
+    page_break_before: bool = False
+    page_break_after: bool = False
 
     def text(self) -> str:
         return "".join(run.text for run in self.runs)
@@ -156,6 +172,11 @@ class RichCell(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     paragraphs: list[RichParagraph] = Field(default_factory=list)
+    # A cell merged vertically with the ones below it spans `row_span` rows;
+    # each of those below is kept as a `merged` placeholder with no content of
+    # its own, so every row still has one cell per column.
+    row_span: int = 1
+    merged: bool = False
 
 
 class RichTable(BaseModel):
@@ -166,6 +187,11 @@ class RichTable(BaseModel):
     kind: Literal["table"] = "table"
     rows: list[list[RichCell]] = Field(default_factory=list)
     bordered: bool = False
+    # The outer edges a table rules off without being `bordered` -- a line above
+    # and below a block of rows, say, with no grid between the cells. Empty when
+    # `bordered`, which already draws every edge. Always listed in OOXML's own
+    # `w:tblBorders` order (top, left, bottom, right).
+    outer_rules: list[Literal["top", "left", "bottom", "right"]] = Field(default_factory=list)
     # Column widths as fractions of the table width, or empty if the source did
     # not fix them. Fractions rather than absolute widths: the Document's page may be
     # narrower than the document the table came from. Ignored when `centered`

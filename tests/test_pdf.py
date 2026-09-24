@@ -10,7 +10,7 @@ import pytest
 from pypdf import PdfReader
 
 from cv_generator.errors import PdfEngineError
-from cv_generator.models import Document
+from cv_generator.models import Document, RichBlock, RichParagraph, RichRun, Section
 from cv_generator.pdf import (
     KNOWN_ENGINES,
     ChromeEngine,
@@ -265,6 +265,49 @@ class TestChromePrinting:
         reader = PdfReader(str(output))
         assert len(reader.pages) == 1
         assert reader.pages[0].images
+
+    def test_a_page_footer_repeats_on_every_page_with_its_number(self, tmp_path: Path) -> None:
+        # A source footer reading "Seite 2 von 4" is a page footer with two
+        # fields, not a line of text to print once at the end.
+        footer = RichParagraph(
+            runs=[
+                RichRun(text="Seite "),
+                RichRun(text="1", field="page"),
+                RichRun(text=" von "),
+                RichRun(text="1", field="pages"),
+            ]
+        )
+        body: list[RichBlock] = [
+            RichParagraph(runs=[RichRun(text=f"Line {n}")]) for n in range(120)
+        ]
+        section = Section(title="Lang", slug="lang", markdown="", blocks=body)
+        document = Document(name="Ada", sections=[section], page_footer=[footer])
+        output = tmp_path / "footer.pdf"
+        ChromeEngine().render(Renderer().render_html(document), output)
+
+        pages = PdfReader(str(output)).pages
+        assert len(pages) > 1
+        texts = [page.extract_text() for page in pages]
+        for number, text in enumerate(texts, start=1):
+            assert f"Seite {number} von {len(pages)}" in text
+        # Shown per page instead of once at the end, not in addition to it.
+        assert sum(text.count("Seite ") for text in texts) == len(pages)
+
+    def test_a_page_break_starts_a_new_page(self, tmp_path: Path) -> None:
+        blocks: list[RichBlock] = [
+            RichParagraph(runs=[RichRun(text="First page")], page_break_after=True),
+            RichParagraph(runs=[RichRun(text="Second page")]),
+        ]
+        section = Section(title="Kurz", slug="kurz", markdown="", blocks=blocks)
+        output = tmp_path / "break.pdf"
+        ChromeEngine().render(
+            Renderer().render_html(Document(name="Ada", sections=[section])), output
+        )
+
+        pages = PdfReader(str(output)).pages
+        assert len(pages) == 2
+        assert "Second page" not in pages[0].extract_text()
+        assert "Second page" in pages[1].extract_text()
 
     def test_build_writes_nothing_to_stderr(self, tmp_path: Path, minimal_path: Path) -> None:
         # Regression guard: probing Playwright by starting its driver left a

@@ -312,9 +312,16 @@ assembly. A `sections` entry copies one span of one file:
   `Document.has_identity`. `docx_import.load_header`/`load_footer` read them
   (see *Imported Word sections* below); `word.py` writes them back out as a
   real, repeating page header/footer, since that is what a `.docx` actually
-  has. HTML/PDF have no such per-page concept, so there each renders once --
-  the header at the top, the footer at the end of the (one, continuous)
-  document.
+  has. HTML has no pages, so there each renders once -- the header at the
+  top, the footer at the end of the (one, continuous) document. The PDF
+  repeats the *footer* on every page instead: the theme also emits it as
+  `<template id="cv-pdf-page-footer">` (with its own `<style>`, since
+  Chromium renders it in isolation), and `pdf/chrome.py` hands that to
+  `page.pdf(footer_template=...)` and sets `cv-pdf-paged` on the root so the
+  theme hides the once-at-the-end copy. Word's `PAGE`/`NUMPAGES` fields
+  arrive as `RichRun.field` (see `docx_import._FieldTracker`); HTML renders
+  them as Chromium's own `pageNumber`/`totalPages` spans, live only inside
+  that template, and `word.py` writes them back as `w:fldSimple`.
 - **Slugs are deduplicated across the whole document** (`_Slugger`), not per
   file. Two sources easily use the same heading, and slugs are the HTML anchors.
 - **`postprocessing` is a list of text substitutions, run against the finished

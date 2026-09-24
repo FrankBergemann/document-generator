@@ -76,11 +76,36 @@
   {% endfor %}
 
   {% if document.page_footer %}
-  {# Not a per-page footer -- HTML/PDF are one continuous document, so this
-     appears once, at the end, unlike the .docx output's real page footer. #}
+  {# HTML has no pages, so here the footer appears once, at the end. The PDF
+     repeats it on every page instead, from the template below -- and hides
+     this one (`.cv-pdf-paged`, set by pdf/chrome.py). #}
   <footer class="cv-page-footer">
     {{ document.page_footer | blocks }}
   </footer>
+  {# Chromium's per-page footer. It is rendered in isolation -- none of the
+     stylesheet above applies -- so it carries its own styles. It is laid out
+     in the page's bottom margin, across the full page width, so it indents
+     itself by @page's side margin. `pageNumber`/`totalPages` spans (see
+     render.py::_run) get the live values. #}
+  <template id="cv-pdf-page-footer">
+    <style>
+      .cv-pdf-page-footer {
+        width: 100%;
+        padding: 0 15mm;
+        font-family: "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        font-size: 10.5pt;
+        line-height: 1.25;
+        color: #1a1a1a;
+        -webkit-print-color-adjust: exact;
+      }
+      .cv-pdf-page-footer p {
+        margin: 0;
+      }
+    </style>
+    <div class="cv-pdf-page-footer">
+      {{ document.page_footer | blocks }}
+    </div>
+  </template>
   {% endif %}
 
 </main>

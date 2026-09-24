@@ -21,9 +21,10 @@ What "keeping the formatting" means here, precisely:
   once flattened into normal reading order (see ``_float_side``). A floating
   picture positioned by a raw offset instead of a keyword, or not wrapped at
   all, is flattened into the reading order in place, same as an inline
-  picture -- and one anchored *behind* the text (``behindDoc="1"``), which
-  Word uses for decorative letterhead scenery rather than content in the
-  reading flow, is dropped entirely (see ``_run_image``).
+  picture -- and a page-sized one anchored *behind* the text
+  (``behindDoc="1"``), which Word uses for decorative letterhead scenery
+  rather than content in the reading flow, is dropped entirely (see
+  ``_run_image``).
 * **Left to the Document's theme** -- font family, page geometry, paragraph spacing and
   the section heading itself. The imported blocks have to sit in a Document rendered
   by this project's themes, not carry a second document's page design into it.
@@ -65,14 +66,16 @@ from __future__ import annotations
 import re
 import zipfile
 from collections.abc import Callable, Iterator, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
-from typing import Literal, TypeVar
+from typing import Literal, TypedDict, TypeVar
 
 import docx
 from docx.document import Document as WordDocument
 from docx.opc.exceptions import PackageNotFoundError
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.oxml.xmlchemy import BaseOxmlElement
 from docx.section import _Footer, _Header
@@ -94,6 +97,11 @@ LOCK_PREFIX = "~$"
 # compatibility (`mc:`, an OOXML extensibility mechanism, not one of them) is
 # only needed here, for `_footer_blocks`.
 _MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+
+# Half an A4 page's width (105 mm, in EMU). A picture behind the text at least
+# this wide is page scenery; a narrower one -- a portrait in a table cell -- is
+# content that merely avoids pushing the cell's text around. See `_run_image`.
+_BACKGROUND_MIN_WIDTH_EMU = 105 * 36000
 
 _Block = WordParagraph | WordTable
 _T = TypeVar("_T")
@@ -130,7 +138,7 @@ def load_section(path: Path, heading: str | None = None, end: str | None = None)
     section_blocks = _section_of(blocks, heading, end, path)
     if not section_blocks:
         raise DocParseError(f"{path}: nothing follows the heading {heading!r}")
-    return [_convert(block, numbering) for block in section_blocks]
+    return [converted for block in section_blocks for converted in _convert(block, numbering)]
 
 
 def load_footer(path: Path) -> list[RichBlock]:
@@ -220,7 +228,9 @@ def _hdrftr_blocks(part: _Header | _Footer, numbering: _Numbering) -> list[RichB
         for element in root.findall(f".//{qn('w:p')}")
         if not any(ancestor.tag == _MC_FALLBACK for ancestor in element.iterancestors())
     )
-    return [_convert(p, numbering) for p in paragraphs]
+    # `_paragraph`, not `_paragraphs`: a page header/footer has no pages of
+    # its own to break, so a page break there is dropped.
+    return [_paragraph(p, numbering) for p in paragraphs]
 
 
 # -- locating the section -------------------------------------------------
@@ -345,57 +355,165 @@ def _is_heading(paragraph: WordParagraph, shape: _HeadingShape) -> bool:
 # -- conversion -----------------------------------------------------------
 
 
-def _convert(block: _Block, numbering: _Numbering) -> RichBlock:
+def _convert(block: _Block, numbering: _Numbering) -> list[RichBlock]:
     if isinstance(block, WordTable):
-        return _table(block, numbering)
-    return _paragraph(block, numbering)
+        return [_table(block, numbering)]
+    return list(_paragraphs(block, numbering))
+
+
+def _paragraphs(paragraph: WordParagraph, numbering: _Numbering) -> list[RichParagraph]:
+    """The paragraph, or the parts a page break inside it splits it into.
+
+    Every part after a break starts a new page (``page_break_before``). A part
+    left empty by the break is dropped rather than kept as a blank line: a
+    break at the very start leaves nothing on the old page, and one at the
+    very end nothing on the new one -- Word keeps the paragraph mark after a
+    trailing break on the *old* page, which is what ``page_break_after`` says.
+    A paragraph holding only a break is still one (empty) paragraph, since
+    that mark still takes up its line.
+    """
+    marker = _numbering_of(paragraph)
+    level, ordered = (None, False) if marker is None else numbering.describe(*marker)
+    segments: list[list[RichRun]] = [[]]
+    for item in _run_items(paragraph):
+        if item is None:
+            segments.append([])
+        else:
+            segments[-1].append(item)
+    last = len(segments) - 1
+    kept = [index for index, runs in enumerate(segments) if runs] or [0]
+    parts = []
+    for position, index in enumerate(kept):
+        runs = _merge(segments[index])
+        parts.append(
+            RichParagraph(
+                runs=runs,
+                level=level,
+                ordered=ordered,
+                alignment=_alignment_of(paragraph),
+                blank_size_pt=None if runs else _mark_size(paragraph),
+                page_break_before=index > 0 or (position == 0 and _page_break_before(paragraph)),
+                page_break_after=position == len(kept) - 1 and index < last,
+            )
+        )
+    return parts
 
 
 def _paragraph(paragraph: WordParagraph, numbering: _Numbering) -> RichParagraph:
-    marker = _numbering_of(paragraph)
-    level, ordered = (None, False) if marker is None else numbering.describe(*marker)
-    return RichParagraph(
-        runs=_merge(_runs(paragraph)),
-        level=level,
-        ordered=ordered,
-        alignment=_alignment_of(paragraph),
+    """The paragraph as one block, for a table cell. A page break inside a
+    cell cannot start a new page (Word itself ignores it there), so the parts
+    are joined back together without one."""
+    parts = _paragraphs(paragraph, numbering)
+    return parts[0].model_copy(
+        update={
+            "runs": _merge([run for part in parts for run in part.runs]),
+            "page_break_before": False,
+            "page_break_after": False,
+        }
     )
+
+
+def _page_break_before(paragraph: WordParagraph) -> bool:
+    """``w:pageBreakBefore``, set on the paragraph or inherited from its style."""
+    direct = paragraph.paragraph_format.page_break_before
+    if direct is not None:
+        return bool(direct)
+    for style in _style_chain(paragraph.style):
+        value = getattr(style, "paragraph_format", None)
+        if value is not None and value.page_break_before is not None:
+            return bool(value.page_break_before)
+    return False
+
+
+def _mark_size(paragraph: WordParagraph) -> float | None:
+    """The font size of the paragraph mark, in points, resolved like a run's.
+
+    A blank paragraph has no run to carry a size, yet Word still draws it one
+    line high -- a line of the *paragraph mark's* size, ``w:pPr/w:rPr/w:sz``,
+    else the paragraph style's. Dropping it renders every blank line at the
+    body size, so a gap under a 24pt title shrinks to a sliver.
+    """
+    properties = paragraph._p.pPr
+    mark = None if properties is None else properties.find(qn("w:rPr"))
+    size = None if mark is None else _int_val(mark.find(qn("w:sz")))
+    if size is not None:
+        return size / 2  # half-points
+    for style in _style_chain(paragraph.style):
+        if style.font.size is not None:
+            return float(style.font.size.pt)
+    return None
 
 
 def _table(table: WordTable, numbering: _Numbering) -> RichTable:
     return RichTable(
-        rows=[
+        rows=_rows(table, numbering),
+        **_borders(table),
+        column_widths=_column_widths(table),
+    )
+
+
+def _rows(table: WordTable, numbering: _Numbering) -> list[list[RichCell]]:
+    """The table's cells, one per column in every row, vertical merges kept.
+
+    ``row.cells`` resolves a ``w:vMerge="continue"`` cell to the cell it
+    continues, so reading it naively repeats that cell's content -- a portrait
+    spanning six rows would appear six times. The raw ``w:tc`` elements, one
+    per grid column once ``gridSpan`` is expanded the same way ``row.cells``
+    expands it, say which positions are continuations: those become
+    ``merged`` placeholders, and the cell they continue gets the ``row_span``.
+    """
+    rows: list[list[RichCell]] = []
+    for row in table.rows:
+        raw = [tc for tc in row._tr.tc_lst for _ in range(tc.grid_span)]
+        rows.append(
             [
-                RichCell(
+                RichCell(merged=True)
+                if tc.vMerge == "continue"
+                else RichCell(
                     paragraphs=[
                         _paragraph(block, numbering)
                         for block in _iter_blocks(cell._tc, cell)
                         if isinstance(block, WordParagraph)
                     ]
                 )
-                for cell in row.cells
+                for cell, tc in zip(row.cells, raw, strict=False)
             ]
-            for row in table.rows
-        ],
-        bordered=_is_bordered(table),
-        column_widths=_column_widths(table),
-    )
+        )
+    for index, row_cells in enumerate(rows):
+        for column, cell in enumerate(row_cells):
+            if cell.merged:
+                continue
+            below = (r[column] if column < len(r) else None for r in rows[index + 1 :])
+            for other in below:
+                if other is None or not other.merged:
+                    break
+                cell.row_span += 1
+    return rows
 
 
-_BOX_EDGES = {qn("w:top"), qn("w:left"), qn("w:bottom"), qn("w:right")}
+_BOX_EDGES: tuple[Literal["top", "left", "bottom", "right"], ...] = (
+    "top",
+    "left",
+    "bottom",
+    "right",
+)
 
 
-def _is_bordered(table: WordTable) -> bool:
-    """Whether the table is framed by a full box of lines, from its own
-    properties or its style.
+class _Borders(TypedDict):
+    bordered: bool
+    outer_rules: list[Literal["top", "left", "bottom", "right"]]
 
-    A table can carry a single decorative rule -- the header table's own
-    ``tblBorders`` sets only ``w:bottom``, the line under the identity block --
-    without looking, in Word, anything like a bordered table. What this flag
-    renders is a full box round every cell (``Table Grid`` in Word output,
-    ``.cv-block-table--ruled`` in HTML), so it must require all four outer
-    edges, not merely one of them -- otherwise a lone rule the source document
-    never framed as a table gets rendered as one.
+
+def _borders(table: WordTable) -> _Borders:
+    """How the table is ruled, from its own properties or its style.
+
+    ``bordered`` means a full box round every cell (``Table Grid`` in Word
+    output, ``.cv-block-table--ruled`` in HTML), so it requires all four outer
+    edges. A table ruling off only some of them -- the header table's lone
+    ``w:bottom`` under the identity block, or a ``w:top`` and ``w:bottom``
+    framing a block of personal details -- is not a grid, and rendering it as
+    one draws a frame the source never had. Those edges become
+    ``outer_rules`` instead, drawn as exactly those lines and nothing else.
     """
     elements = chain([table._tbl.tblPr], (style.element for style in _style_chain(table.style)))
     for element in elements:
@@ -408,8 +526,11 @@ def _is_bordered(table: WordTable) -> bool:
         present = {
             edge.tag for edge in borders if edge.get(qn("w:val")) not in (None, "none", "nil")
         }
-        return _BOX_EDGES.issubset(present)
-    return False
+        edges = [edge for edge in _BOX_EDGES if qn(f"w:{edge}") in present]
+        if len(edges) == len(_BOX_EDGES):
+            return {"bordered": True, "outer_rules": []}
+        return {"bordered": False, "outer_rules": edges}
+    return {"bordered": False, "outer_rules": []}
 
 
 def _column_widths(table: WordTable) -> list[float]:
@@ -429,19 +550,134 @@ def _runs(paragraph: WordParagraph) -> list[RichRun]:
     ``Paragraph.runs`` skips a ``w:hyperlink``'s children, which would drop the
     link's text as well as the link.
     """
-    collected: list[RichRun] = []
+    return [run for run in _run_items(paragraph) if run is not None]
+
+
+def _run_items(paragraph: WordParagraph) -> list[RichRun | None]:
+    """The paragraph's runs, with ``None`` wherever a page break sits.
+
+    A page break (``w:br w:type="page"``) is a child of a run, like text, so
+    it can sit in the middle of one; that run is split in two around it.
+    """
+    collected: list[RichRun | None] = []
+    fields = _FieldTracker()
+
+    def add(element: BaseOxmlElement, link: str | None, field: _FieldKind | None) -> None:
+        for piece in _split_at_page_breaks(element):
+            if piece is None:
+                collected.append(None)
+                continue
+            run = _run(Run(piece, paragraph), paragraph, link, field)
+            # A picture-only run has no `w:t` of its own, so `run.text` alone
+            # would drop it here the same way a truly empty run should be.
+            if run.text or run.image:
+                collected.append(run)
+
     for child in paragraph._p.iterchildren():
         if child.tag == qn("w:r"):
-            collected.append(_run(Run(child, paragraph), paragraph, None))
+            add(child, None, fields.step(child))
         elif child.tag == qn("w:hyperlink"):
             url = _hyperlink_url(child, paragraph)
-            collected.extend(
-                _run(Run(element, paragraph), paragraph, url)
-                for element in child.findall(qn("w:r"))
-            )
-    # A picture-only run has no `w:t` of its own, so `run.text` alone would
-    # drop it here the same way a truly empty run should be dropped.
-    return [run for run in collected if run.text or run.image]
+            for element in child.findall(qn("w:r")):
+                add(element, url, fields.step(element))
+        elif child.tag == qn("w:fldSimple"):
+            field = _field_kind(child.get(qn("w:instr"), ""))
+            for element in child.findall(qn("w:r")):
+                add(element, None, field)
+    return collected
+
+
+def _is_page_break(element: BaseOxmlElement) -> bool:
+    return bool(element.tag == qn("w:br") and element.get(qn("w:type")) == "page")
+
+
+def _split_at_page_breaks(run: BaseOxmlElement) -> list[BaseOxmlElement | None]:
+    """``run`` as it is, or -- if it holds page breaks -- the pieces between
+    them, each a copy of the run keeping its ``w:rPr``, with ``None`` for
+    every break."""
+    if not any(_is_page_break(child) for child in run):
+        return [run]
+    properties = run.find(qn("w:rPr"))
+    pieces: list[BaseOxmlElement | None] = []
+    current: list[BaseOxmlElement] = []
+
+    def piece() -> BaseOxmlElement:
+        element = OxmlElement("w:r")
+        if properties is not None:
+            element.append(deepcopy(properties))
+        for child in current:
+            element.append(deepcopy(child))
+        return element
+
+    for child in run:
+        if child.tag == qn("w:rPr"):
+            continue
+        if _is_page_break(child):
+            pieces.extend([piece(), None])
+            current = []
+        else:
+            current.append(child)
+    pieces.append(piece())
+    return pieces
+
+
+_FieldKind = Literal["page", "pages"]
+
+# The field instructions whose value is a page count, by their first word.
+# `SECTIONPAGES` is `NUMPAGES` for a document of one section, which is what an
+# imported document becomes here.
+_FIELD_KINDS: dict[str, _FieldKind] = {
+    "PAGE": "page",
+    "NUMPAGES": "pages",
+    "SECTIONPAGES": "pages",
+}
+
+
+def _field_kind(instruction: str) -> _FieldKind | None:
+    words = instruction.split()
+    return _FIELD_KINDS.get(words[0].upper()) if words else None
+
+
+class _FieldTracker:
+    """Which pagination field, if any, each run of a paragraph displays.
+
+    A complex field is spread over sibling runs: ``w:fldChar begin``, runs of
+    ``w:instrText`` naming the field, ``w:fldChar separate``, the runs showing
+    its last computed *result*, ``w:fldChar end``. Only the result runs carry
+    visible text, so those are the ones marked; the rest have no text and are
+    dropped by ``_runs`` as they always were. Fed every run of the paragraph in
+    document order, hyperlinks included, since a field may span both.
+
+    Fields nest (a ``PAGE`` inside an ``IF``), so this keeps a stack; a result
+    run belongs to the innermost field.
+    """
+
+    def __init__(self) -> None:
+        # Per open field: its instruction so far, and whether it is past
+        # `separate` (showing its result).
+        self._open: list[tuple[str, bool]] = []
+
+    def step(self, run: BaseOxmlElement) -> _FieldKind | None:
+        """Advance past ``run``; the field kind its visible text belongs to."""
+        kind = None
+        for element in run.iterchildren():
+            if element.tag == qn("w:fldChar"):
+                self._char(element.get(qn("w:fldCharType")))
+            elif element.tag == qn("w:instrText") and self._open:
+                instruction, showing = self._open[-1]
+                if not showing:
+                    self._open[-1] = (instruction + (element.text or ""), showing)
+            elif self._open and self._open[-1][1]:
+                kind = _field_kind(self._open[-1][0])
+        return kind
+
+    def _char(self, char_type: str | None) -> None:
+        if char_type == "begin":
+            self._open.append(("", False))
+        elif char_type == "separate" and self._open:
+            self._open[-1] = (self._open[-1][0], True)
+        elif char_type == "end" and self._open:
+            self._open.pop()
 
 
 def _hyperlink_url(element: BaseOxmlElement, paragraph: WordParagraph) -> str | None:
@@ -453,7 +689,9 @@ def _hyperlink_url(element: BaseOxmlElement, paragraph: WordParagraph) -> str | 
     return None if relationship is None else str(relationship.target_ref)
 
 
-def _run(run: Run, paragraph: WordParagraph, link: str | None) -> RichRun:
+def _run(
+    run: Run, paragraph: WordParagraph, link: str | None, field: _FieldKind | None = None
+) -> RichRun:
     size = _resolve(run, paragraph, lambda font: font.size)
     color = _resolve(run, paragraph, lambda font: font.color.rgb)
     image = _run_image(run, paragraph)
@@ -468,6 +706,7 @@ def _run(run: Run, paragraph: WordParagraph, link: str | None) -> RichRun:
         link=link,
         image=image,
         float_side=_float_side(run) if image is not None else None,
+        field=field,
     )
 
 
@@ -483,19 +722,27 @@ def _run_image(run: Run, paragraph: WordParagraph) -> Photo | None:
     the run's own part resolves to the image part. A run carries at most one;
     Word does not put two pictures in one run.
 
-    A floating picture with ``behindDoc="1"`` is excluded -- that flag is how
-    Word marks decorative letterhead artwork meant to sit behind the text as a
-    page background, not a picture in the reading flow (the real cases this
-    project imports, like a CV photo, are always in front). Such a background
-    is often sized to the whole page; flattened into an inline image the way
+    A floating picture with ``behindDoc="1"`` *and* at least
+    ``_BACKGROUND_MIN_WIDTH_EMU`` wide is excluded -- that combination is how
+    Word lays out decorative letterhead artwork meant to sit behind the text
+    as a page background, not a picture in the reading flow. Such a background
+    is sized to the page or near it; flattened into an inline image the way
     every other picture is, it would push the actual content onto a spurious
-    extra page instead of staying invisible scenery.
+    extra page instead of staying invisible scenery. ``behindDoc`` alone is
+    not enough: a CV photo placed into a table cell is routinely anchored
+    behind the text too (so the cell's text does not reflow around it), and
+    that one is content.
     """
     blip = run._r.find(f".//{qn('a:blip')}")
     if blip is None:
         return None
+    width_emu, height_emu = _image_extent(run)
     anchor = run._r.find(f".//{qn('wp:anchor')}")
-    if anchor is not None and anchor.get("behindDoc") == "1":
+    if (
+        anchor is not None
+        and anchor.get("behindDoc") == "1"
+        and (width_emu is None or width_emu >= _BACKGROUND_MIN_WIDTH_EMU)
+    ):
         return None
     relationship_id = blip.get(qn("r:embed"))
     if relationship_id is None:
@@ -503,7 +750,6 @@ def _run_image(run: Run, paragraph: WordParagraph) -> Photo | None:
     part = paragraph.part.related_parts.get(relationship_id)
     if part is None:
         return None
-    width_emu, height_emu = _image_extent(run)
     crop_left, crop_top, crop_right, crop_bottom = _crop_fractions(blip)
     return Photo(
         data=part.blob,
@@ -658,7 +904,18 @@ def _merge(runs: Sequence[RichRun]) -> list[RichRun]:
 
 
 def _format_of(run: RichRun) -> tuple[object, ...]:
-    return (run.bold, run.italic, run.underline, run.strike, run.size_pt, run.color, run.link)
+    # `field` is part of it: merged into a neighbour, a page number would
+    # become plain text ("Seite 2") that no longer updates.
+    return (
+        run.bold,
+        run.italic,
+        run.underline,
+        run.strike,
+        run.size_pt,
+        run.color,
+        run.link,
+        run.field,
+    )
 
 
 # -- numbering ------------------------------------------------------------

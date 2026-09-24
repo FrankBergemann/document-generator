@@ -72,6 +72,22 @@ _UNREACHABLE = ("econnrefused", "enotfound", "eai_again", "getaddrinfo", "socket
 
 _WS_DEFAULT_PORTS = {"ws": 80, "wss": 443}
 
+# The contract with a theme for a footer repeated on every page: the theme puts
+# its markup in `<template id="cv-pdf-page-footer">`, and this engine marks
+# the document `cv-pdf-paged` while printing it with that template, so the
+# theme can hide the footer it shows once at the end of the (pageless) HTML.
+# A theme without the template prints as before. The markup stays in the
+# theme, not here, for the same reason `@page` does.
+PAGE_FOOTER_TEMPLATE_ID = "cv-pdf-page-footer"
+PAGED_CLASS = "cv-pdf-paged"
+
+_TAKE_PAGE_FOOTER = f"""() => {{
+  const template = document.getElementById("{PAGE_FOOTER_TEMPLATE_ID}");
+  if (template === null) return null;
+  document.documentElement.classList.add("{PAGED_CLASS}");
+  return template.innerHTML;
+}}"""
+
 
 class ChromeEngine:
     """Prints a self-contained HTML document to PDF with headless Chromium.
@@ -156,6 +172,7 @@ class ChromeEngine:
                     page.set_content(html, wait_until="load")
                     # Without this the PDF would use the screen stylesheet.
                     page.emulate_media(media="print")
+                    footer = page.evaluate(_TAKE_PAGE_FOOTER)
                     # Written here rather than by passing ``path=``, because
                     # with a remote browser the file belongs on this side of
                     # the websocket, not the browser's.
@@ -166,6 +183,11 @@ class ChromeEngine:
                             # Playwright types this as a TypedDict it does not
                             # export publicly, so the shape cannot be declared.
                             margin=ZERO_MARGINS,  # type: ignore[arg-type]
+                            display_header_footer=footer is not None,
+                            # Chromium's default header is the date and title;
+                            # an empty element is how to ask for none.
+                            header_template="<span></span>",
+                            footer_template=footer or "",
                         )
                     )
                 finally:

@@ -24,7 +24,7 @@ import docx
 from docx.document import Document as WordDocument
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.shared import Emu, Mm, Pt, RGBColor
 from docx.table import _Cell
 from docx.text.paragraph import Paragraph
@@ -44,13 +44,16 @@ from cv_generator.models import (
 from cv_generator.ooxml import (
     add_bottom_border,
     add_table_bottom_border,
+    add_table_rules,
     float_picture,
     move_run_into,
     remove_paragraph,
     set_column_widths,
     set_language,
+    set_paragraph_mark_size,
     set_picture_crop,
     set_table_cell_margins,
+    start_field,
     start_hyperlink,
 )
 
@@ -75,6 +78,9 @@ _PARAGRAPH_ALIGNMENT = {
     "right": WD_ALIGN_PARAGRAPH.RIGHT,
     "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
 }
+
+# The field instruction written back for each `RichRun.field`.
+_FIELDS = {"page": "PAGE", "pages": "NUMPAGES"}
 
 A4_WIDTH_MM = 210.0
 A4_HEIGHT_MM = 297.0
@@ -513,8 +519,16 @@ class WordRenderer:
         paragraph = target.add_paragraph(style=style)
         if block.alignment is not None:
             paragraph.alignment = _PARAGRAPH_ALIGNMENT[block.alignment]
+        if block.page_break_before:
+            paragraph.paragraph_format.page_break_before = True
+        if block.blank_size_pt is not None:
+            set_paragraph_mark_size(paragraph, block.blank_size_pt)
         for run in block.runs:
             self._add_imported_run(paragraph, run)
+        if block.page_break_after:
+            # The same shape the source had: a break at the end of the
+            # paragraph's own runs, its mark staying on the old page.
+            paragraph.add_run().add_break(WD_BREAK.PAGE)
 
     def _add_imported_run(self, paragraph: Paragraph, run: RichRun) -> None:
         """Write one run with the formatting it had in the source document.
@@ -565,7 +579,12 @@ class WordRenderer:
                 font.color.rgb = RGBColor.from_string(run.color)
             elif run.link:
                 font.color.rgb = RGBColor.from_string(self.theme.accent)
-        if link is not None:
+        if run.field is not None:
+            # A real field again, so Word keeps counting pages instead of
+            # showing the number the source had cached.
+            field = start_field(link if link is not None else paragraph._p, _FIELDS[run.field])
+            move_run_into(word_run, field)
+        elif link is not None:
             move_run_into(word_run, link)
 
     def _add_imported_table(self, document: WordDocument, block: RichTable) -> None:
@@ -577,6 +596,9 @@ class WordRenderer:
         table = document.add_table(rows=0, cols=columns)
         if block.bordered and "Table Grid" in _style_names(document):
             table.style = "Table Grid"
+        elif block.outer_rules:
+            # Mirrors `.cv-block-table--rule-*`: 1pt, in ink.
+            add_table_rules(table, block.outer_rules, color=theme.ink, size=8)
         if block.centered:
             # Sized to its own content instead of stretched to the page -- the
             # default a table gets when no column widths are set at all -- and
@@ -605,6 +627,15 @@ class WordRenderer:
                 placeholder = cells[index].paragraphs[0]
                 self._add_imported(document, cells[index], cell.paragraphs)
                 remove_paragraph(placeholder)
+
+        # Merged only once every row exists: `merge` needs both corners. The
+        # cells merged in are `merged` placeholders, still holding only their
+        # empty default paragraph, which `merge` drops rather than moves.
+        for row_index, row in enumerate(block.rows):
+            for index, cell in enumerate(row):
+                if cell.row_span > 1:
+                    last = min(row_index + cell.row_span, len(block.rows)) - 1
+                    table.cell(row_index, index).merge(table.cell(last, index))
 
     # -- inline content ---------------------------------------------------
 

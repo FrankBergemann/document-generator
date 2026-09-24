@@ -116,7 +116,7 @@ def _blocks(blocks: Sequence[RichBlock]) -> str:
             parts.append(_table(block))
             index += 1
         elif block.level is None:
-            parts.append(f"<p{_align_attr(block.alignment)}>{_runs(block.runs)}</p>")
+            parts.append(f"<p{_paragraph_attr(block)}>{_runs(block.runs)}</p>")
             index += 1
         else:
             end = index
@@ -146,25 +146,43 @@ def _list(items: Sequence[RichParagraph], level: int = 0) -> str:
         while index < len(items) and (items[index].level or 0) > level:
             index += 1
         nested = _list(items[start:index], level + 1) if index > start else ""
-        parts.append(f"<li{_align_attr(item.alignment)}>{_runs(item.runs)}{nested}</li>")
+        parts.append(f"<li{_paragraph_attr(item)}>{_runs(item.runs)}{nested}</li>")
     parts.append(f"</{tag}>")
     return "".join(parts)
 
 
-def _align_attr(alignment: str | None) -> str:
-    """A ``style="text-align:…"`` attribute, or nothing when unset.
+def _paragraph_attr(paragraph: RichParagraph) -> str:
+    """A ``style`` attribute for what the paragraph itself carries, or nothing.
 
     The source's four alignment values (see :mod:`cv_generator.docx_import`)
     are valid CSS ``text-align`` values verbatim, so no translation table is
     needed here the way ``_run`` needs one for colour.
+
+    A blank paragraph's own size goes into the same attribute as a
+    ``font-size``: ``.cv-blocks p:empty`` is one line high, and that line is
+    as tall as the source's paragraph mark made it.
+
+    A page break becomes ``break-before``/``break-after``, which only paged
+    media -- the PDF, a browser's print -- act on; on screen it is nothing.
     """
-    return f' style="text-align:{alignment}"' if alignment else ""
+    declarations = []
+    if paragraph.alignment:
+        declarations.append(f"text-align:{paragraph.alignment}")
+    if paragraph.blank_size_pt is not None:
+        declarations.append(f"font-size:{paragraph.blank_size_pt:g}pt")
+    if paragraph.page_break_before:
+        declarations.append("break-before:page")
+    if paragraph.page_break_after:
+        declarations.append("break-after:page")
+    return f' style="{";".join(declarations)}"' if declarations else ""
 
 
 def _table(table: RichTable) -> str:
     classes = "cv-block-table"
     if table.bordered:
         classes += " cv-block-table--ruled"
+    for edge in table.outer_rules:
+        classes += f" cv-block-table--rule-{edge}"
     if table.centered:
         classes += " cv-block-table--centered"
     parts = [f'<table class="{classes}">']
@@ -180,10 +198,19 @@ def _table(table: RichTable) -> str:
         parts.append(f"<colgroup>{columns}</colgroup>")
     parts.append("<tbody>")
     for row in table.rows:
-        cells = "".join(f"<td>{_blocks(cell.paragraphs)}</td>" for cell in row)
+        cells = "".join(
+            f"<td{_rowspan_attr(cell.row_span)}>{_blocks(cell.paragraphs)}</td>"
+            for cell in row
+            if not cell.merged
+        )
         parts.append(f"<tr>{cells}</tr>")
     parts.append("</tbody></table>")
     return "".join(parts)
+
+
+def _rowspan_attr(row_span: int) -> str:
+    """A ``rowspan`` attribute for a vertically merged cell, or nothing."""
+    return f' rowspan="{row_span}"' if row_span > 1 else ""
 
 
 def _runs(runs: Sequence[RichRun]) -> str:
@@ -247,13 +274,23 @@ def _image_html(photo: Photo, float_side: Literal["left", "right"] | None) -> st
     return f'<span class="{classes} cv-inline-image--cropped"{style}>{inner}</span>'
 
 
+_FIELD_CLASSES = {"page": "pageNumber", "pages": "totalPages"}
+
+
 def _run(run: RichRun) -> str:
     if run.image is not None:
         # Formatting flags (bold, colour, ...) do not apply to a picture; a
         # link around it does, the same as around text.
         html = _image_html(run.image, run.float_side)
         return f'<a href="{escape(run.link)}">{html}</a>' if run.link else html
-    html = str(escape(run.text))
+    # A line break inside a paragraph (`w:br`, read as "\n") would collapse
+    # into a space in HTML.
+    html = str(escape(run.text)).replace("\n", "<br>")
+    if run.field is not None:
+        # The class names are Chromium's own: inside a page header/footer
+        # template it fills them with the live page number/count (see
+        # pdf/chrome.py). Anywhere else the cached value stays shown.
+        html = f'<span class="{_FIELD_CLASSES[run.field]}">{html}</span>'
     if run.bold:
         html = f"<strong>{html}</strong>"
     if run.italic:

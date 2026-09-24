@@ -13,6 +13,7 @@ these helpers only have to place their own.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Literal
 
 from docx.oxml import OxmlElement, parse_xml
@@ -79,13 +80,17 @@ def _insert_after(
     parent.insert(index, element)
 
 
+def _single_edge(edge: str, *, color: str, size: int, space: int) -> BaseOxmlElement:
+    element = OxmlElement(f"w:{edge}")
+    element.set(qn("w:val"), "single")
+    element.set(qn("w:sz"), str(size))
+    element.set(qn("w:space"), str(space))
+    element.set(qn("w:color"), color)
+    return element
+
+
 def _single_bottom(*, color: str, size: int, space: int) -> BaseOxmlElement:
-    bottom = OxmlElement("w:bottom")
-    bottom.set(qn("w:val"), "single")
-    bottom.set(qn("w:sz"), str(size))
-    bottom.set(qn("w:space"), str(space))
-    bottom.set(qn("w:color"), color)
-    return bottom
+    return _single_edge("bottom", color=color, size=size, space=space)
 
 
 def add_bottom_border(paragraph: Paragraph, *, color: str, size: int = 6, space: int = 2) -> None:
@@ -101,14 +106,55 @@ def add_bottom_border(paragraph: Paragraph, *, color: str, size: int = 6, space:
     _insert_after(paragraph._p.get_or_add_pPr(), borders, _BEFORE_PBDR)
 
 
+# CT_PPr children that must *follow* w:rPr -- everything else precedes it.
+_AFTER_PPR_RPR = frozenset(qn(tag) for tag in ("w:sectPr", "w:pPrChange"))
+
+
+def set_paragraph_mark_size(paragraph: Paragraph, points: float) -> None:
+    """Size ``paragraph``'s own mark, which is what sets a blank paragraph's height.
+
+    python-docx has no API for the mark's run properties (``w:pPr/w:rPr``).
+    Placed after every other ``w:pPr`` child except the two the schema puts
+    after it.
+    """
+    properties = paragraph._p.get_or_add_pPr()
+    mark = OxmlElement("w:rPr")
+    half_points = str(round(points * 2))
+    for tag in ("w:sz", "w:szCs"):
+        size = OxmlElement(tag)
+        size.set(qn("w:val"), half_points)
+        mark.append(size)
+    follows = next((child for child in properties if child.tag in _AFTER_PPR_RPR), None)
+    if follows is None:
+        properties.append(mark)
+    else:
+        follows.addprevious(mark)
+
+
 def add_table_bottom_border(table: Table, *, color: str, size: int = 6) -> None:
     """Draw a rule under the whole of ``table``, spanning every column.
 
     The paragraph-level equivalent would only underline one cell, so a header
     laid out as columns needs the rule on the table instead.
     """
+    add_table_rules(table, ["bottom"], color=color, size=size)
+
+
+_TBL_BORDER_EDGES = ("top", "left", "bottom", "right")
+
+
+def add_table_rules(table: Table, edges: Iterable[str], *, color: str, size: int = 6) -> None:
+    """Draw single rules along the given outer ``edges`` of ``table``.
+
+    ``edges`` may come in any order; they are written in the order
+    ``CT_TblBorders`` declares -- top, left, bottom, right -- since that
+    sequence is part of the schema, not just ``w:tblBorders``' own position.
+    """
+    wanted = set(edges)
     borders = OxmlElement("w:tblBorders")
-    borders.append(_single_bottom(color=color, size=size, space=0))
+    for edge in _TBL_BORDER_EDGES:
+        if edge in wanted:
+            borders.append(_single_edge(edge, color=color, size=size, space=0))
     _insert_after(table._tbl.tblPr, borders, _BEFORE_TBL_BORDERS)
 
 
@@ -176,6 +222,20 @@ def start_hyperlink(paragraph: Paragraph, url: str) -> BaseOxmlElement:
     element = OxmlElement("w:hyperlink")
     element.set(qn("r:id"), relationship_id)
     paragraph._p.append(element)
+    return element
+
+
+def start_field(parent: BaseOxmlElement, instruction: str) -> BaseOxmlElement:
+    """Open a simple field (``w:fldSimple``) such as ``PAGE`` at the end of ``parent``.
+
+    ``parent`` is the paragraph's ``w:p`` or a ``w:hyperlink`` in it. The run
+    moved into it with :func:`move_run_into` is the field's cached result:
+    what a reader that does not compute fields shows, and what Word replaces
+    with the live value -- which is the point, for a page number.
+    """
+    element = OxmlElement("w:fldSimple")
+    element.set(qn("w:instr"), instruction)
+    parent.append(element)
     return element
 
 
