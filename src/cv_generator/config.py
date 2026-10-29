@@ -34,7 +34,10 @@ Five rules decide what a span *is*:
   workbook's own borders; left out, whether any cell in the range is ruled
   still decides it, same as before this key existed. See
   :mod:`cv_generator.xlsx_import` for what "keeping the formatting" means for a
-  spreadsheet.
+  spreadsheet. Instead of a rectangle, an ``"xlsx"`` entry may name a
+  ``diagram`` -- the title of a chart -- which is imported as a picture of that
+  chart (see :mod:`cv_generator.xlsx_chart`). ``tab`` names the sheet either
+  one is read from; left out, it is the workbook's active sheet.
 * **``begin`` and ``end`` are regular expressions matched against a headline, and
   neither is required.** Plain text -- a heading has no regex syntax in it --
   keeps matching exactly the one heading it names, the same as before regular
@@ -149,33 +152,55 @@ class SectionSpec(BaseModel):
     # -insensitive" stops mattering, since JSON's own `true`/`false` literals
     # have no case to vary.
     noframes: bool | None = None
+    # The sheet an "xlsx" entry reads -- its rectangle or its diagram. None
+    # means the workbook's active sheet, which is what a rectangle was always
+    # read from before this key existed.
+    tab: str | None = None
+    # Instead of a rectangle, an "xlsx" entry may import a chart: the title of
+    # the chart on `tab`, matched the way `begin`/`end` are (a regular
+    # expression, case-insensitive, against the whole title). See
+    # :mod:`cv_generator.xlsx_chart`.
+    diagram: str | None = None
 
     @model_validator(mode="after")
     def _rectangle_matches_format(self) -> SectionSpec:
-        """The four corners are required together for "xlsx" and meaningless otherwise.
+        """An "xlsx" entry names a rectangle or a diagram; nothing else names either.
 
-        Half a rectangle is not a smaller rectangle, and a corner given for a
-        `.md` or `.docx` entry would silently do nothing -- both are typos worth
-        failing loudly over, the same reason an unknown key is rejected.
+        The four corners are required together: half a rectangle is not a
+        smaller rectangle. A rectangle *and* a diagram would be two answers to
+        "what does this entry import"; neither would leave the question open.
+        And a corner, `tab` or `diagram` given for a `.md` or `.docx` entry
+        would silently do nothing. All of these are typos worth failing loudly
+        over, the same reason an unknown key is rejected.
         """
         corners = (self.col_start, self.col_end, self.row_start, self.row_end)
         if self.format == "xlsx":
-            if any(corner is None for corner in corners):
+            if self.diagram is not None:
+                if any(corner is not None for corner in corners):
+                    raise ValueError(
+                        "an 'xlsx' entry imports a 'diagram' or a cell rectangle "
+                        "('col-start', 'col-end', 'row-start', 'row-end'), not both"
+                    )
+            elif any(corner is None for corner in corners):
                 raise ValueError(
                     "an 'xlsx' entry needs 'col-start', 'col-end', 'row-start' and "
-                    "'row-end' to name the rectangle to read"
+                    "'row-end' to name the rectangle to read, or 'diagram' to name a chart"
                 )
-        elif any(corner is not None for corner in corners):
-            raise ValueError(
-                "'col-start', 'col-end', 'row-start' and 'row-end' only apply to format 'xlsx'"
-            )
+        else:
+            if any(corner is not None for corner in corners):
+                raise ValueError(
+                    "'col-start', 'col-end', 'row-start' and 'row-end' only apply to format 'xlsx'"
+                )
+            for key, value in (("tab", self.tab), ("diagram", self.diagram)):
+                if value is not None:
+                    raise ValueError(f"'{key}' only applies to format 'xlsx'")
         return self
 
     @model_validator(mode="after")
     def _noframes_matches_format(self) -> SectionSpec:
-        """`noframes` styles the one table an "xlsx" entry produces; nothing else has one."""
-        if self.noframes is not None and self.format != "xlsx":
-            raise ValueError("'noframes' only applies to format 'xlsx'")
+        """`noframes` styles the table an "xlsx" rectangle produces; nothing else has one."""
+        if self.noframes is not None and (self.format != "xlsx" or self.diagram is not None):
+            raise ValueError("'noframes' only applies to an 'xlsx' cell rectangle")
         return self
 
 

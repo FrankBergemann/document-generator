@@ -241,6 +241,8 @@ follows. (An earlier version of this same recipe imported a project list from a
 | `end` | The headline it stops **before** (`.md`/`.docx` only), matched the same way — that headline belongs to whatever comes next and is not copied. **Leave it out** and the span runs to the end of the file. An `end` that never turns up is an error, not "run to the end": the recipe said where to stop. |
 | `col-start` / `col-end` / `row-start` / `row-end` | The cell rectangle to copy (`xlsx` only), Excel's own way — column letters and 1-based row numbers, **both ends inclusive**. Required together; rejected for any other `format`. |
 | `noframes` | `true`/`false` (`xlsx` only, rejected for any other `format`) — draw the imported table without cell borders regardless of what the workbook itself has. **Leave it out** (or `false`) and whether any cell in the range is ruled still decides it, same as before this key existed. |
+| `tab` | The sheet an `xlsx` entry reads, by name — its rectangle or its `diagram`. **Leave it out** and the workbook's active sheet is read. |
+| `diagram` | Imports a **chart** instead of a cell rectangle (`xlsx` only): the chart's title on `tab`, matched like `begin` (a regular expression, case-insensitive, against the whole title). Rules out the four rectangle keys and `noframes`. The chart becomes one centered picture, page-wide — see below. |
 | `title` | Renames a `.docx`/`.xlsx` span's section. Never required: falls back to `begin` (the heading it starts at) if there is one. With neither, the section shows **no heading at all** — a filename is not a title, and this holds for every section, not just the first — a Markdown span already takes its titles from its own `##` headings and is never affected. |
 | `output` | The stem the results take: `dist/document.html`, `dist/document.docx`, `dist/document.pdf`. Defaults to that of the file the header came from — `document.md`, hence `dist/document.*`. Mutually exclusive with `target`, which also picks the directory. |
 | `target` | Where the results go **and** what they're called, relative to the project root and with no extension — `"exports/lebenslauf"` becomes `exports/lebenslauf.html`, `.docx`, `.pdf`. Use this instead of `output` when the results shouldn't land in `dist/`. `-o`/`--out` still overrides either. |
@@ -311,6 +313,22 @@ single Markdown file as its own header and sections, as before.
 | Layout | Sized to its own content and **centered**, unlike an imported Word section, which fills the page. The sheet's own column *widths* are read but not used for this reason — there is no page-width table for their proportions to describe. |
 | Not kept | Font family and page layout, for the same reason as a Word import — and a cell's colour when it is a theme reference rather than a literal RGB value, which is most of them. |
 
+### What an imported Excel chart keeps
+
+```json
+{ "source": "Supermarket-*.xlsx", "format": "xlsx",
+  "tab": "quantity_per_user", "diagram": "Sold items count and revenue per customer" }
+```
+
+| | |
+|---|---|
+| Which chart | The one on `tab` whose title matches `diagram`; a chart with no title is matched by its object name (Excel's "Chart 1"). No match, or several, is an error naming the charts that *are* there. |
+| What it becomes | A picture (PNG, 200 dpi) the width of the page, centered — redrawn from the chart's data, since an `.xlsx` holds no image of its chart. The same picture goes into HTML, PDF and `.docx`. |
+| Kept | Title, series names and colours, a secondary value axis, axis titles, the value axes' number format, gridlines, slanted category labels, the legend's position and deleted entries — and the slot layout of clustered bars, so the usual side-by-side trick with invisible spacer series looks the same. |
+| Chart types | Bar/column (clustered, stacked, 100 % stacked), line and pie. Anything else is an error, not a blank picture. |
+| Values | The ones Excel cached in the chart, like a range's cell values; a chart with no cache (one written by a library rather than Excel) is read from its cells instead. |
+| Not kept | Fonts, theme colours (mapped to Office's default palette), and the chart's own size. |
+
 `run/validate.sh` prints which file fed which section, which is the thing to
 check before a build goes out — a recipe resolves globs and headlines, and
 neither is visible in the result:
@@ -340,6 +358,7 @@ data/document.md ─────────────────────
   "Projekthistorie"   docx_import.py
 *.xlsx ───────────────────────────┘
   a cell rectangle    xlsx_import.py
+  or a chart          xlsx_chart.py
 ```
 
 - [src/cv_generator/config.py](src/cv_generator/config.py) — the recipe's schema, and resolving a `source` to one file
@@ -348,6 +367,7 @@ data/document.md ─────────────────────
 - [src/cv_generator/markdown.py](src/cv_generator/markdown.py) — the one Markdown parser both backends share
 - [src/cv_generator/docx_import.py](src/cv_generator/docx_import.py) — a Word section → blocks in the model
 - [src/cv_generator/xlsx_import.py](src/cv_generator/xlsx_import.py) — a cell rectangle → blocks in the model
+- [src/cv_generator/xlsx_chart.py](src/cv_generator/xlsx_chart.py) — a chart → a picture in the model (read with the standard library, drawn with matplotlib)
 - [src/cv_generator/render.py](src/cv_generator/render.py) — model → self-contained HTML
 - [src/cv_generator/word.py](src/cv_generator/word.py) — model → `.docx` (see `WordTheme`)
 - [src/cv_generator/ooxml.py](src/cv_generator/ooxml.py) — the OOXML bits python-docx has no API for

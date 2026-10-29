@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from openpyxl import load_workbook
 
 from cv_generator.errors import DocParseError
 from cv_generator.models import RichTable
@@ -88,6 +89,33 @@ class TestRectangle:
         path.write_text("just text", encoding="utf-8")
         with pytest.raises(DocParseError, match="as an Excel workbook"):
             load_section(path, col_start="C", col_end="G", row_start=3, row_end=3)
+
+
+class TestTab:
+    """`tab` picks the sheet; without it, the active sheet is read, as before."""
+
+    @pytest.fixture
+    def two_sheets(self, workbook: Path) -> Path:
+        book = load_workbook(str(workbook))
+        book.create_sheet("Zweites")["C3"] = "Auf dem zweiten Blatt"
+        book.save(str(workbook))
+        return workbook
+
+    def test_the_named_sheet_is_read(self, two_sheets: Path) -> None:
+        blocks = load_section(
+            two_sheets, col_start="C", col_end="C", row_start=3, row_end=3, tab="Zweites"
+        )
+        assert isinstance(blocks[0], RichTable)
+        assert texts(blocks[0]) == [["Auf dem zweiten Blatt"]]
+
+    def test_without_a_tab_the_active_sheet_is_read(self, two_sheets: Path) -> None:
+        blocks = load_section(two_sheets, col_start="C", col_end="C", row_start=3, row_end=3)
+        assert isinstance(blocks[0], RichTable)
+        assert texts(blocks[0]) == [[WORKBOOK_HEADERS[0]]]
+
+    def test_an_unknown_tab_is_an_error(self, two_sheets: Path) -> None:
+        with pytest.raises(DocParseError, match="no sheet named 'Nope'"):
+            load_section(two_sheets, col_start="C", col_end="C", row_start=3, row_end=3, tab="Nope")
 
 
 class TestFormatting:

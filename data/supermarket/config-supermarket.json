@@ -1,0 +1,19 @@
+{
+  "sections": [
+    {
+      "source": "Supermarket-scenario-uniform-random_2026-10-29_16-35-22.xlsx",
+      "format": "xlsx",
+      "tab": "quantity_per_user",
+      "diagram": "Sold items count and revenue per customer"
+
+    },
+    {
+      "source": "Supermarket-scenario-uniform-random_2026-10-29_16-35-22.xlsx",
+      "format": "xlsx",
+      "tab": "quantity_per_product",
+      "diagram": "Sold items count and revenue per product"
+
+    }
+  ],
+  "target": "dist/supermarket"
+}

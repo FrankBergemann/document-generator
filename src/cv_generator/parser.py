@@ -64,6 +64,7 @@ from cv_generator.docx_import import load_section as load_docx_section
 from cv_generator.errors import DocParseError
 from cv_generator.models import Document, Photo, RichBlock, Section
 from cv_generator.postprocessing import apply_postprocessing
+from cv_generator.xlsx_chart import load_diagram as load_xlsx_diagram
 from cv_generator.xlsx_import import load_section as load_xlsx_section
 
 FRONTMATTER_DELIM = "---"
@@ -432,32 +433,36 @@ def _copy_docx(spec: SectionSpec, path: Path, slug_for: _Slugger, *, source: str
 
 
 def _copy_xlsx(spec: SectionSpec, path: Path, slug_for: _Slugger, *, source: str) -> Section:
-    """One section, from the rectangle of cells ``spec`` names.
+    """One section, from the rectangle of cells -- or the chart -- ``spec`` names.
 
     Always one and never several, for the same reason as a ``.docx`` import: a
-    cell rectangle has no headings to split it at. Unlike a ``.docx`` entry
-    there is no ``begin`` heading to fall back on either, so with no ``title``
-    the section renders with no heading at all -- see :func:`_copy_docx` for
-    why a filename does not stand in for one.
+    cell rectangle has no headings to split it at, and a chart is one picture.
+    Unlike a ``.docx`` entry there is no ``begin`` heading to fall back on
+    either, so with no ``title`` the section renders with no heading at all --
+    see :func:`_copy_docx` for why a filename does not stand in for one. (A
+    chart draws its own title inside the picture anyway.)
     """
     title = spec.title
 
-    # `SectionSpec._rectangle_matches_format` guarantees all four are set
-    # together with format "xlsx".
-    assert spec.col_start is not None
-    assert spec.col_end is not None
-    assert spec.row_start is not None
-    assert spec.row_end is not None
-
     try:
-        blocks = load_xlsx_section(
-            path,
-            col_start=spec.col_start,
-            col_end=spec.col_end,
-            row_start=spec.row_start,
-            row_end=spec.row_end,
-            noframes=bool(spec.noframes),
-        )
+        if spec.diagram is not None:
+            blocks = load_xlsx_diagram(path, diagram=spec.diagram, tab=spec.tab)
+        else:
+            # `SectionSpec._rectangle_matches_format` guarantees all four are
+            # set together when an "xlsx" entry names no diagram.
+            assert spec.col_start is not None
+            assert spec.col_end is not None
+            assert spec.row_start is not None
+            assert spec.row_end is not None
+            blocks = load_xlsx_section(
+                path,
+                col_start=spec.col_start,
+                col_end=spec.col_end,
+                row_start=spec.row_start,
+                row_end=spec.row_end,
+                noframes=bool(spec.noframes),
+                tab=spec.tab,
+            )
     except DocParseError as exc:
         raise DocParseError(f"{source}: {exc}") from exc
 

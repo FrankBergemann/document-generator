@@ -147,6 +147,7 @@ document.md ──────────────────────�
   "Projekthistorie"  docx_import.py
 *.xlsx ──────────────────────┘
   a cell rectangle    xlsx_import.py
+  or a chart          xlsx_chart.py
 ```
 
 Each stage only knows the one before it. Adding an output format, a theme or a
@@ -236,7 +237,11 @@ assembly. A `sections` entry copies one span of one file:
   all four together, and rejects all four for any other format) take the place
   of `begin`/`end` — a spreadsheet has no headings to bound a span with. Unlike
   `end` below, all four corners are **inclusive**, Excel's own convention. See
-  [Imported Excel ranges](#imported-excel-ranges).
+  [Imported Excel ranges](#imported-excel-ranges). **Or it names a `diagram`**
+  (a chart title, matched like `begin`) instead of the four corners -- never
+  both, and `noframes` goes with the rectangle only. `tab` picks the sheet for
+  either; without it the active sheet is read. See
+  [Imported Excel charts](#imported-excel-charts).
 - **`end` is exclusive, for `.md` and `.docx`.** The span stops *before* that
   headline, so `end` names what comes next. Uniform on purpose — the natural
   reading differs between a `.md` (where a heading delimits a section) and a
@@ -475,6 +480,39 @@ is: `write_workbook` in [tests/support.py](tests/support.py) writes a workbook
 with a bold, ruled header row and one data row (a date, a plain number, a
 currency figure), plus content just outside the rectangle every test asks for —
 the negative control for "the importer respected the corners it was given".
+
+## Imported Excel charts
+
+An `"xlsx"` entry with a `diagram` imports a chart as a **picture**: one
+centered `RichParagraph` whose one run carries a PNG `Photo`, sized to the
+page's content width (`CHART_WIDTH_MM`). That reuses `RichRun.image`, which
+both backends already render, so a chart needed no backend change and cannot
+differ between output formats. The mechanism is
+[xlsx_chart.py](src/cv_generator/xlsx_chart.py), split in two halves:
+`read_diagram` (OOXML -> a renderer-free `Chart`) and `draw` (`Chart` -> PNG,
+matplotlib on the Agg backend, imported lazily so a chart-free build does not
+pay for it).
+
+Three things worth knowing before touching it:
+
+- **openpyxl is no help here: it drops every chart on load.** The chart is
+  found by walking the package's relationships by hand: `xl/workbook.xml`
+  (sheet name -> `r:id`) -> worksheet part -> its drawing part -> each
+  `xdr:graphicFrame`'s `c:chart` -> chart part. Matching is by the chart's own
+  `c:title`, falling back to the frame's `cNvPr/@name` for an untitled chart.
+- **Every series keeps its slot in a clustered bar group, drawn or not.** Excel
+  users place two bar series on two axes side by side with invisible spacer
+  series (`a:noFill`, empty `c:numLit`) -- the supermarket workbook does
+  exactly that. Laying the group out from *all* series reproduces it without
+  special-casing the trick; skipping spacers would draw the two series on top
+  of each other.
+- **Values come from the chart's own caches** (`c:numCache`/`c:strCache`),
+  the same "last calculated" reading as `data_only`. A chart written by
+  openpyxl has no caches at all, so `_fill_from_cells` resolves the series'
+  formulas against the sheet instead -- which is also what the
+  `write_chart_workbook` fixture in [tests/support.py](tests/support.py)
+  exercises, since it is built by openpyxl. The real, Excel-shaped workbook
+  is covered through `data/supermarket/config-supermarket.json`.
 
 ## Postprocessing
 

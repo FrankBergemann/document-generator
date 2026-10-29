@@ -34,6 +34,7 @@ from docx.shared import Mm, Pt
 from docx.table import _Cell
 from docx.text.paragraph import Paragraph
 from openpyxl import Workbook
+from openpyxl.chart import AreaChart, BarChart, LineChart, Reference
 from openpyxl.styles import Border, Font, Side
 
 from cv_generator.pdf.chrome import ChromeEngine, local_browser_installed
@@ -293,6 +294,79 @@ def write_workbook(path: Path) -> Path:
 
     for column, width in zip("CDEFG", (14.0, 11.5, 21.5, 41.0, 13.0), strict=True):
         sheet.column_dimensions[column].width = width
+
+    workbook.save(str(path))
+    return path
+
+
+# The chart workbook `write_chart_workbook` builds, and what a test reads back.
+CHART_SHEET = "Umsatz"
+CHART_TITLE = "Stückzahl und Umsatz je Monat"
+CHART_MONTHS = ("Jan", "Feb", "Mär")
+CHART_COUNTS = (12.0, 7.0, 9.0)
+CHART_REVENUE = (240.5, 140.0, 180.25)
+TREND_SHEET = "Trend"
+TREND_TITLE = "Umsatztrend"
+
+
+def write_chart_workbook(path: Path) -> Path:
+    """Write a workbook with charts of the shape :mod:`xlsx_chart` reads.
+
+    Built rather than committed, like :func:`write_workbook`. Sheet
+    :data:`CHART_SHEET` (the active one) holds a bar chart in the shape the
+    real supermarket workbook has: a count on the primary axis and revenue on
+    a secondary one, set side by side by one empty, unfilled spacer series in
+    each group. A second, untitled chart on the same sheet is a decoy for
+    "matched by title". Sheet :data:`TREND_SHEET` holds a line chart, plus an
+    area chart -- a type the importer does not draw.
+
+    openpyxl writes a chart's references without cached points, so reading
+    this workbook also exercises the fallback to the sheet's own cells.
+    """
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = CHART_SHEET
+    sheet.append(["Monat", "Stück", "Umsatz"])
+    for row in zip(CHART_MONTHS, CHART_COUNTS, CHART_REVENUE, strict=True):
+        sheet.append(list(row))
+    last = len(CHART_MONTHS) + 1
+    months = Reference(sheet, min_col=1, min_row=2, max_row=last)
+
+    counts = BarChart()
+    counts.title = CHART_TITLE
+    counts.add_data(Reference(sheet, min_col=2, min_row=1, max_row=last), titles_from_data=True)
+    counts.add_data(Reference(sheet, min_col=5, min_row=2, max_row=last))  # empty: a spacer
+    counts.set_categories(months)
+    counts.y_axis.title = "Stück"
+    counts.series[1].graphicalProperties.noFill = True
+
+    revenue = BarChart()
+    revenue.add_data(Reference(sheet, min_col=5, min_row=2, max_row=last))  # empty: a spacer
+    revenue.add_data(Reference(sheet, min_col=3, min_row=1, max_row=last), titles_from_data=True)
+    revenue.set_categories(months)
+    revenue.series[0].graphicalProperties.noFill = True
+    revenue.y_axis.axId = 200
+    revenue.y_axis.title = "Umsatz"
+    revenue.y_axis.number_format = "#,##0.00"
+    revenue.y_axis.crosses = "max"
+    revenue.y_axis.majorGridlines = None  # openpyxl's default; Excel's is none
+    counts += revenue
+    sheet.add_chart(counts, "E2")
+
+    untitled = BarChart()
+    untitled.add_data(Reference(sheet, min_col=2, min_row=2, max_row=last))
+    sheet.add_chart(untitled, "E20")
+
+    trend_sheet = workbook.create_sheet(TREND_SHEET)
+    trend = LineChart()
+    trend.title = TREND_TITLE
+    trend.add_data(Reference(sheet, min_col=3, min_row=1, max_row=last), titles_from_data=True)
+    trend.set_categories(months)
+    trend_sheet.add_chart(trend, "A1")
+    area = AreaChart()
+    area.title = "Fläche"
+    area.add_data(Reference(sheet, min_col=2, min_row=1, max_row=last), titles_from_data=True)
+    trend_sheet.add_chart(area, "A20")
 
     workbook.save(str(path))
     return path

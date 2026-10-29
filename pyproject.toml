@@ -12,6 +12,7 @@ authors = [{ name = "Frank Bergemann", email = "frank.bergemann@gmx.de" }]
 dependencies = [
     "jinja2>=3.1",
     "markdown-it-py>=3.0",
+    "matplotlib>=3.8",
     "openpyxl>=3.1",
     "pydantic>=2.7",
     "python-docx>=1.1",

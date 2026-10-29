@@ -10,15 +10,19 @@ import pytest
 
 from cv_generator.config import BuildConfig, SectionSpec, load_config, resolve_source
 from cv_generator.errors import DocParseError
-from cv_generator.models import Document, RichTable
+from cv_generator.models import Document, RichParagraph, RichTable
 from cv_generator.parser import build_doc, load_doc, slugify
 from tests.conftest import PROJECTS_CONFIG, PROJECTS_MD, write_config
 from tests.support import (
     AFTER_SECTION,
     BEFORE_HEADING,
+    CHART_SHEET,
+    CHART_TITLE,
     PROJEKTLISTE_NAME,
+    REPO_ROOT,
     SAMPLE_PROJECTS,
     png,
+    write_chart_workbook,
     write_projektliste,
     write_workbook,
 )
@@ -157,14 +161,18 @@ class TestLoadConfig:
 
     def test_rejects_noframes_on_a_markdown_entry(self, tmp_path: Path) -> None:
         config = {"sections": [{"source": "document.md", "format": "md", "noframes": True}]}
-        with pytest.raises(DocParseError, match="'noframes' only applies to format 'xlsx'"):
+        with pytest.raises(
+            DocParseError, match="'noframes' only applies to an 'xlsx' cell rectangle"
+        ):
             load_config(write_config(tmp_path, config))
 
     def test_rejects_noframes_on_a_docx_entry(self, tmp_path: Path) -> None:
         config = {
             "sections": [{"source": "Projektliste.docx", "format": "docx", "noframes": False}]
         }
-        with pytest.raises(DocParseError, match="'noframes' only applies to format 'xlsx'"):
+        with pytest.raises(
+            DocParseError, match="'noframes' only applies to an 'xlsx' cell rectangle"
+        ):
             load_config(write_config(tmp_path, config))
 
     def test_accepts_noframes_on_an_xlsx_entry(self, tmp_path: Path) -> None:
@@ -618,6 +626,52 @@ class TestWordSpans:
         }
         with pytest.raises(DocParseError, match="keep exactly one"):
             build(tmp_path, config)
+
+
+class TestDiagramKeys:
+    """`tab` and `diagram` belong to an "xlsx" entry; a diagram replaces the rectangle."""
+
+    def test_a_diagram_needs_no_rectangle(self, tmp_path: Path) -> None:
+        config = {
+            "sections": [
+                {"source": "a.xlsx", "format": "xlsx", "tab": "Umsatz", "diagram": "Umsatz"}
+            ]
+        }
+        loaded = load_config(write_config(tmp_path, config))
+        assert (loaded.sections[0].tab, loaded.sections[0].diagram) == ("Umsatz", "Umsatz")
+
+    def test_a_tab_may_go_with_a_rectangle(self, tmp_path: Path) -> None:
+        config = {"sections": [{"source": "a.xlsx", "format": "xlsx", "tab": "B", **XLSX_RANGE}]}
+        assert load_config(write_config(tmp_path, config)).sections[0].tab == "B"
+
+    def test_rejects_a_diagram_and_a_rectangle_together(self, tmp_path: Path) -> None:
+        config = {
+            "sections": [{"source": "a.xlsx", "format": "xlsx", "diagram": "X", **XLSX_RANGE}]
+        }
+        with pytest.raises(DocParseError, match="a 'diagram' or a cell rectangle"):
+            load_config(write_config(tmp_path, config))
+
+    def test_an_xlsx_entry_with_neither_says_both_options(self, tmp_path: Path) -> None:
+        config = {"sections": [{"source": "a.xlsx", "format": "xlsx", "tab": "B"}]}
+        with pytest.raises(DocParseError, match="or 'diagram' to name a chart"):
+            load_config(write_config(tmp_path, config))
+
+    @pytest.mark.parametrize("key", ["tab", "diagram"])
+    @pytest.mark.parametrize("source_format", ["md", "docx"])
+    def test_rejects_the_keys_on_other_formats(
+        self, tmp_path: Path, key: str, source_format: str
+    ) -> None:
+        config = {"sections": [{"source": "a", "format": source_format, key: "X"}]}
+        with pytest.raises(DocParseError, match=f"'{key}' only applies to format 'xlsx'"):
+            load_config(write_config(tmp_path, config))
+
+    def test_rejects_noframes_on_a_diagram(self, tmp_path: Path) -> None:
+        # A chart is a picture, not a table: there are no frames to suppress.
+        config = {
+            "sections": [{"source": "a.xlsx", "format": "xlsx", "diagram": "X", "noframes": True}]
+        }
+        with pytest.raises(DocParseError, match="'noframes' only applies to an 'xlsx' cell"):
+            load_config(write_config(tmp_path, config))
 
 
 # The rectangle every `TestXlsxSpans` entry names -- a bold, ruled header row
@@ -1209,6 +1263,58 @@ class TestLoadDoc:
         config_path = write_config(projects_dir, PROJECTS_CONFIG | {"target": "exports/doc"})
         loaded = load_doc(config_path)
         assert loaded.target == root / "exports" / "doc"
+
+
+class TestXlsxDiagrams:
+    """An `.xlsx` entry naming a `diagram` brings in that chart as one picture."""
+
+    @pytest.fixture
+    def chart_dir(self, tmp_path: Path) -> Path:
+        write_chart_workbook(tmp_path / "Umsatz.xlsx")
+        (tmp_path / "document.md").write_text(PROJECTS_MD, encoding="utf-8")
+        return tmp_path
+
+    def test_the_section_carries_one_picture(self, chart_dir: Path) -> None:
+        doc = spans(
+            chart_dir,
+            {"source": "Umsatz.xlsx", "format": "xlsx", "tab": CHART_SHEET, "diagram": CHART_TITLE},
+        )
+        section = doc.sections[-1]
+        assert section.markdown == ""
+        assert len(section.blocks) == 1
+        paragraph = section.blocks[0]
+        assert isinstance(paragraph, RichParagraph)
+        assert paragraph.runs[0].image is not None
+
+    def test_without_a_title_no_heading_is_shown(self, chart_dir: Path) -> None:
+        # The chart draws its own title inside the picture.
+        doc = spans(chart_dir, {"source": "Umsatz.xlsx", "format": "xlsx", "diagram": CHART_TITLE})
+        assert doc.sections[-1].title is None
+        assert doc.sections[-1].slug == "umsatz"
+
+    def test_a_chart_that_is_not_there_is_an_error_naming_the_entry(self, chart_dir: Path) -> None:
+        with pytest.raises(DocParseError, match=r"sections\[1\]: .*no chart on sheet"):
+            spans(chart_dir, {"source": "Umsatz.xlsx", "format": "xlsx", "diagram": "Gewinn"})
+
+
+class TestSupermarketRecipe:
+    """`data/supermarket/config-supermarket.json` imports two charts, nothing else."""
+
+    @pytest.fixture
+    def loaded(self, monkeypatch: pytest.MonkeyPatch) -> Any:
+        monkeypatch.chdir(REPO_ROOT)
+        return load_doc(REPO_ROOT / "data" / "supermarket" / "config-supermarket.json")
+
+    def test_it_assembles_two_pictures(self, loaded: Any) -> None:
+        sections = loaded.doc.sections
+        assert len(sections) == 2
+        for section in sections:
+            assert section.title is None
+            assert isinstance(section.blocks[0], RichParagraph)
+            assert section.blocks[0].runs[0].image is not None
+
+    def test_the_target_comes_from_the_recipe(self, loaded: Any) -> None:
+        assert loaded.target == REPO_ROOT / "dist" / "supermarket"
 
 
 class TestRepositoryRecipe:

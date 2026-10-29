@@ -81,6 +81,7 @@ def load_section(
     row_start: int,
     row_end: int,
     noframes: bool = False,
+    tab: str | None = None,
 ) -> list[RichBlock]:
     """Import the rectangle from ``col_start``/``row_start`` to ``col_end``/``row_end``.
 
@@ -96,6 +97,8 @@ def load_section(
             ruled. ``False`` (the default) leaves the existing "ruled if any
             cell in the range is" reading in place; it can only ever suppress
             borders, never add them to an unruled range.
+        tab: The sheet to read, by name. ``None`` (the default) is the
+            workbook's active sheet.
 
     Returns:
         A single-element list holding one :class:`RichTable` -- always one,
@@ -103,12 +106,19 @@ def load_section(
 
     Raises:
         DocParseError: if the file cannot be read as a workbook, has no active
-            sheet, or the rectangle is empty or runs backwards.
+            sheet, has no sheet named ``tab``, or the rectangle is empty or runs
+            backwards.
     """
     workbook = _open(path)
-    sheet = workbook.active
-    if sheet is None:
-        raise DocParseError(f"{path}: the workbook has no active sheet")
+    if tab is None:
+        sheet = workbook.active
+        if sheet is None:
+            raise DocParseError(f"{path}: the workbook has no active sheet")
+    elif tab in workbook.sheetnames:
+        sheet = workbook[tab]
+    else:
+        names = ", ".join(repr(name) for name in workbook.sheetnames)
+        raise DocParseError(f"{path}: no sheet named {tab!r} (sheets: {names})")
 
     first_col, last_col = _column_range(path, col_start, col_end)
     if row_start < 1:
