@@ -1,11 +1,19 @@
 {
   "sections": [
     {
+      "source": "supermarket-head.md",
+      "format": "md"
+    },
+    {
       "source": "Supermarket-scenario-uniform-random_2026-10-29_16-35-22.xlsx",
       "format": "xlsx",
       "tab": "quantity_per_user",
       "diagram": "Sold items count and revenue per customer"
 
+    },
+    {
+      "source": "supermarket-headline-product.md",
+      "format": "md"
     },
     {
       "source": "Supermarket-scenario-uniform-random_2026-10-29_16-35-22.xlsx",
@@ -15,5 +23,5 @@
 
     }
   ],
-  "target": "dist/supermarket"
+  "target": "dist/supermarket/supermarket"
 }
