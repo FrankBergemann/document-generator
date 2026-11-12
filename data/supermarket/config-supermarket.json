@@ -5,7 +5,7 @@
       "format": "md"
     },
     {
-      "source": "Supermarket-scenario-uniform-random_2026-10-29_16-35-22.xlsx",
+      "source": "Supermarket-scenario-uniform-random_result.xlsx",
       "format": "xlsx",
       "tab": "quantity_per_user",
       "diagram": "Sold items count and revenue per customer"
@@ -16,7 +16,7 @@
       "format": "md"
     },
     {
-      "source": "Supermarket-scenario-uniform-random_2026-10-29_16-35-22.xlsx",
+      "source": "Supermarket-scenario-uniform-random_result.xlsx",
       "format": "xlsx",
       "tab": "quantity_per_product",
       "diagram": "Sold items count and revenue per product"
