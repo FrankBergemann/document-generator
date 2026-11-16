@@ -9,7 +9,6 @@
       "format": "xlsx",
       "tab": "quantity_per_user",
       "diagram": "Sold items count and revenue per customer"
-
     },
     {
       "source": "supermarket-headline-product.md",
@@ -20,7 +19,16 @@
       "format": "xlsx",
       "tab": "quantity_per_product",
       "diagram": "Sold items count and revenue per product"
-
+    },
+        {
+      "source": "supermarket-headline-prod-category.md",
+      "format": "md"
+    },
+    {
+      "source": "Supermarket-scenario-uniform-random_result.xlsx",
+      "format": "xlsx",
+      "tab": "quantity_per_prod_category",
+      "diagram": "Sold items count and revenue per product category"
     }
   ],
   "target": "dist/supermarket/supermarket"
