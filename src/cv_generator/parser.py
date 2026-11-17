@@ -62,6 +62,7 @@ from cv_generator.docx_import import load_footer as load_docx_footer
 from cv_generator.docx_import import load_header as load_docx_header
 from cv_generator.docx_import import load_section as load_docx_section
 from cv_generator.errors import DocParseError
+from cv_generator.image_import import load_image
 from cv_generator.models import Document, Photo, RichBlock, Section
 from cv_generator.postprocessing import apply_postprocessing
 from cv_generator.xlsx_chart import load_diagram as load_xlsx_diagram
@@ -323,6 +324,9 @@ def build_doc(
         if spec.format == "xlsx":
             sections.append(_copy_xlsx(spec, path, slug_for, source=where))
             continue
+        if spec.format == "png" or spec.format == "jpeg":
+            sections.append(_copy_image(spec, path, slug_for, source=where))
+            continue
 
         text = _read(path)
         if header is None and spec.begin is None:
@@ -469,6 +473,27 @@ def _copy_xlsx(spec: SectionSpec, path: Path, slug_for: _Slugger, *, source: str
     return Section(
         title=title,
         slug=slug_for(title or path.stem),
+        markdown="",
+        blocks=blocks,
+        source=str(path),
+    )
+
+
+def _copy_image(spec: SectionSpec, path: Path, slug_for: _Slugger, *, source: str) -> Section:
+    """One section holding the whole PNG/JPEG file ``spec`` names, centered.
+
+    Titled like an ``.xlsx`` import: by ``title`` if given, else not at all --
+    a filename names the file, not what a reader would call the picture.
+    """
+    assert spec.format == "png" or spec.format == "jpeg"
+    try:
+        blocks = load_image(path, image_format=spec.format)
+    except DocParseError as exc:
+        raise DocParseError(f"{source}: {exc}") from exc
+
+    return Section(
+        title=spec.title,
+        slug=slug_for(spec.title or path.stem),
         markdown="",
         blocks=blocks,
         source=str(path),

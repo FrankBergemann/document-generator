@@ -1,4 +1,6 @@
 {
+  "title": "CV",
+  "description": "This is a simple CV scenario with a table of projects and a list",
   "sections": [
     {
       "source": "cv-head.docx",

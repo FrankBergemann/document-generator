@@ -103,7 +103,7 @@ CONFIG_SUFFIX = ".json"
 # What a section's `source` is read as. Distinct from the CLI's own --format,
 # which names an *output* (html/docx/pdf); this one names the reader a span is
 # parsed by, and is what dispatch in `parser.build_doc` switches on.
-SourceFormat = Literal["md", "docx", "xlsx"]
+SourceFormat = Literal["md", "docx", "xlsx", "png", "jpeg"]
 
 # Only these make a value a pattern. Everything else is a plain relative path, so
 # a file really named "doc (2).md" is not accidentally read as a glob.
@@ -197,6 +197,19 @@ class SectionSpec(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _headlines_match_format(self) -> SectionSpec:
+        """`begin`/`end` bound a span of headings; an image has none to bound.
+
+        A "png"/"jpeg" entry always places the whole picture, so a headline
+        given for one would silently do nothing -- a typo worth failing over.
+        """
+        if self.format in ("png", "jpeg"):
+            for key, value in (("begin", self.begin), ("end", self.end)):
+                if value is not None:
+                    raise ValueError(f"'{key}' does not apply to format {self.format!r}")
+        return self
+
+    @model_validator(mode="after")
     def _noframes_matches_format(self) -> SectionSpec:
         """`noframes` styles the table an "xlsx" rectangle produces; nothing else has one."""
         if self.noframes is not None and (self.format != "xlsx" or self.diagram is not None):
@@ -236,6 +249,12 @@ class BuildConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Commentary for a human reading the recipe: what it builds and why. Not
+    # read by anything -- in particular `title` is *not* the document's title
+    # or a section heading (a section's own `title` is that), and neither key
+    # reaches any output. Declared only so `extra="forbid"` accepts them.
+    title: str | None = None
+    description: str | None = None
     sections: list[SectionSpec] = Field(min_length=1)
     # Text substitutions run against the assembled Document, after every
     # section is copied in and before any output format is rendered -- see

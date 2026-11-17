@@ -228,7 +228,7 @@ document.
 assembly. A `sections` entry copies one span of one file:
 
 - **`format` says which reader parses `source`, and is required.** `"md"`,
-  `"docx"` or `"xlsx"` — not guessed from `source`'s own suffix, because `source`
+  `"docx"`, `"xlsx"`, `"png"` or `"jpeg"` — not guessed from `source`'s own suffix, because `source`
   may be a glob or a reissued file whose name is not a promise about its
   content. This is what `build_doc` switches on; it does not look at the resolved
   path's suffix at all.
@@ -513,6 +513,22 @@ Three things worth knowing before touching it:
   `write_chart_workbook` fixture in [tests/support.py](tests/support.py)
   exercises, since it is built by openpyxl. The real, Excel-shaped workbook
   is covered through `data/supermarket/config-supermarket.json`.
+
+## Imported images
+
+A `"png"`/`"jpeg"` entry places one whole image file the way a `diagram`
+places a chart: one centered `RichParagraph` whose one run carries a `Photo`,
+so no backend needed a change. The mechanism is
+[image_import.py](src/cv_generator/image_import.py). Two things worth knowing:
+
+- **The declared `format` is checked against the file's bytes.** A JPEG named
+  in a `"png"` entry is an error, the same "a name is not a promise" reasoning
+  as `format` being required at all. `begin`/`end` are rejected for an image.
+- **Size is pixels at 96 DPI, capped at `MAX_WIDTH_MM`** (the page's content
+  width, the same as a chart's), aspect ratio kept. A declared DPI is ignored:
+  python-docx reports 72 for both "declared 72" and "declared nothing". The
+  size is always set explicitly, or Word would place a large bitmap at its
+  full natural size, off the page.
 
 ## Postprocessing
 

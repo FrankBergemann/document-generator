@@ -1,4 +1,6 @@
 {
+  "title": "Rechnung",
+  "description": "This is a simple invoice scenario with a table of invoice items and a",
   "sections": [
     {
       "source": "Rechnung-head.docx",

@@ -108,6 +108,23 @@ class TestLoadConfig:
         with pytest.raises(DocParseError, match="outputs"):
             load_config(path)
 
+    def test_title_and_description_are_accepted_as_commentary(self, tmp_path: Path) -> None:
+        config = dict(PROJECTS_CONFIG, title="Lebenslauf", description="Ein Beispiel.")
+        loaded = load_config(write_config(tmp_path, config))
+        assert loaded.title == "Lebenslauf"
+        assert loaded.description == "Ein Beispiel."
+
+    def test_title_and_description_are_optional(self, tmp_path: Path) -> None:
+        loaded = load_config(write_config(tmp_path, PROJECTS_CONFIG))
+        assert loaded.title is None
+        assert loaded.description is None
+
+    def test_the_recipe_title_does_not_reach_the_document(self, projects_dir: Path) -> None:
+        # Commentary only: no section heading or identity line may come from it.
+        config = BuildConfig.model_validate(dict(PROJECTS_CONFIG, title="Nur ein Kommentar"))
+        doc = build_doc(config, projects_dir).doc
+        assert "Nur ein Kommentar" not in doc.model_dump_json()
+
     def test_metadata_is_no_longer_a_key(self, tmp_path: Path) -> None:
         # It was replaced by an entry with no `begin`, and leaving both in would
         # be two ways to say where the header comes from.

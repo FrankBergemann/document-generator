@@ -1,4 +1,6 @@
 {
+  "title": "Supermarket",
+  "description": "This is a supermarket scenario with uniform random distribution of products and customers.",
   "sections": [
     {
       "source": "supermarket-head.md",
@@ -20,7 +22,7 @@
       "tab": "quantity_per_product",
       "diagram": "Sold items count and revenue per product"
     },
-        {
+    {
       "source": "supermarket-headline-prod-category.md",
       "format": "md"
     },
@@ -29,6 +31,14 @@
       "format": "xlsx",
       "tab": "quantity_per_prod_category",
       "diagram": "Sold items count and revenue per product category"
+    },
+    {
+      "source": "supermarket-headline-product.md",
+      "format": "md"
+    },
+    {
+      "source": "Sold-items-count-revenue-per-product.png",
+      "format": "png"
     }
   ],
   "target": "dist/supermarket/supermarket"
